@@ -1,0 +1,940 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  EMPLOYEE
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  UNINFORMED
+}
+
+enum PetSpecies {
+  DOG
+  CAT
+  OTHER
+}
+
+enum PetGender {
+  MALE
+  FEMALE
+  UNINFORMED
+}
+
+enum PetSize {
+  SMALL
+  MEDIUM
+  LARGE
+  GIANT
+}
+
+enum VaccinesStatus {
+  YES
+  NO
+  UNINFORMED
+}
+
+enum PetStatus {
+  ACTIVE
+  INACTIVE
+  DECEASED
+}
+
+enum MembershipStatus {
+  ACTIVE
+  PENDING_PAYMENT
+  INACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum MembershipUsageStatus {
+  RESERVED
+  CONSUMED
+  RELEASED
+}
+
+enum AppointmentPaymentMode {
+  AVULSO
+  PACKAGE
+  RENEWAL_AT_CHECKOUT
+}
+
+enum MembershipRenewalStatus {
+  PENDING_PAYMENT
+  PAID
+  CANCELLED
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  ARRIVED
+  IN_SERVICE
+  BATHING
+  WAITING_PICKUP
+  FINISHED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  PIX
+  CASH
+  DEBIT
+  CREDIT
+  TRANSFER
+  VOUCHER
+  OTHER
+}
+
+enum PaymentStatus {
+  PAID
+  PENDING
+  NOT_REQUIRED
+  CANCELLED
+}
+
+enum SaleStatus {
+  WAITING_PAYMENT
+  PARTIALLY_PAID
+  PENDING
+  PAID
+  CANCELLED
+  REFUNDED
+}
+
+enum SaleOrigin {
+  AGENDA
+  DIRECT
+  PRE_SALE
+}
+
+enum DiscountType {
+  VALUE
+  PERCENT
+}
+
+enum SaleItemType {
+  SERVICE
+  PRODUCT
+}
+
+enum CashSessionStatus {
+  OPEN
+  CLOSED
+}
+
+enum CashMovementType {
+  CASH_IN
+  CASH_OUT
+  EXPENSE
+  TRANSFER_IN
+  TRANSFER_OUT
+  ADJUSTMENT
+}
+
+enum PreSaleStatus {
+  OPEN
+  CONVERTED
+  EXPIRED
+  CANCELLED
+}
+
+enum FinancialAccountType {
+  CASH_DRAWER
+  CHECKING_ACCOUNT
+  SAVINGS_ACCOUNT
+  DIGITAL_ACCOUNT
+  PAYMENT_WALLET
+  OTHER
+}
+
+enum FinancialPaymentType {
+  CASH
+  PIX
+  DEBIT_CARD
+  CREDIT_CARD
+  BANK_TRANSFER
+  OTHER
+}
+
+enum SettlementDayType {
+  CALENDAR
+  BUSINESS
+}
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  document  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  users     User[]
+  customers Customer[]
+  pets      Pet[]
+  services  Service[]
+  products  Product[]
+  productCategories ProductCategory[]
+  productBrands ProductBrand[]
+  suppliers Supplier[]
+  serviceCategories ServiceCategory[]
+  plans     MembershipPlan[]
+  internalCodeCounters InternalCodeCounter[]
+  cashSessions CashSession[]
+  cashMovements CashMovement[]
+  preSales PreSale[]
+  catalogItems CatalogItem[]
+  salesReceipts SalesReceipt[]
+  financialAccounts FinancialAccount[]
+  financialPaymentMethods FinancialPaymentMethod[]
+  paymentMethodBrands PaymentMethodBrand[]
+  paymentFeeRules PaymentFeeRule[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  companyId    String
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(EMPLOYEE)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  company      Company  @relation(fields: [companyId], references: [id])
+}
+
+model Customer {
+  id           String   @id @default(cuid())
+  companyId    String
+  name         String
+  internalCode Int?
+  cpf          String
+  gender       Gender   @default(UNINFORMED)
+  customGender String?
+  phone        String
+  zipCode      String?
+  street       String?
+  number       String?
+  complement   String?
+  neighborhood String?
+  city         String?
+  state        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  company      Company  @relation(fields: [companyId], references: [id])
+  pets         Pet[]
+  histories    CustomerHistory[]
+  memberships  CustomerMembership[]
+  appointments Appointment[]
+  sales        Sale[]
+  preSales     PreSale[]
+
+  @@unique([companyId, cpf])
+  @@unique([companyId, internalCode])
+}
+
+model Pet {
+  id             String         @id @default(cuid())
+  companyId      String
+  customerId     String
+  name           String
+  species        PetSpecies
+  customSpecies  String?
+  breed          String?
+  gender         PetGender      @default(UNINFORMED)
+  size           PetSize?
+  color          String?
+  weight         Decimal?       @db.Decimal(8, 2)
+  birthDate      DateTime?
+  vaccinesStatus VaccinesStatus @default(UNINFORMED)
+  status         PetStatus      @default(ACTIVE)
+  isPrimary      Boolean        @default(false)
+  notes          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  company        Company        @relation(fields: [companyId], references: [id])
+  customer       Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  histories      CustomerHistory[]
+  memberships    CustomerMembership[]
+  appointments   Appointment[]
+  sales          Sale[]
+  preSales       PreSale[]
+}
+
+model Service {
+  id               String   @id @default(cuid())
+  companyId        String
+  internalCode     Int?
+  catalogCode      Int?
+  legacyInternalCode Int?
+  name             String
+  category         String?
+  categoryId       String?
+  petSize          String?
+  coat             String?
+  price            Decimal  @db.Decimal(10, 2)
+  costEstimate     Decimal? @db.Decimal(10, 2)
+  estimatedMinutes Int
+  desiredMargin    Decimal? @db.Decimal(5, 2)
+  active           Boolean  @default(true)
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  company          Company  @relation(fields: [companyId], references: [id])
+  categoryRef      ServiceCategory? @relation(fields: [categoryId], references: [id])
+  plans            MembershipPlan[]
+  appointments     Appointment[]
+  appointmentExtras AppointmentExtraService[]
+  saleItems        SaleItem[]
+  preSaleItems     PreSaleItem[]
+  catalogItem      CatalogItem?
+
+  @@unique([companyId, internalCode])
+  @@unique([companyId, catalogCode])
+}
+
+model InternalCodeCounter {
+  id        String   @id @default(cuid())
+  companyId String
+  kind      String
+  nextValue Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, kind])
+}
+
+model ServiceCategory {
+  id             String   @id @default(cuid())
+  companyId      String
+  name           String
+  normalizedName String
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  company        Company  @relation(fields: [companyId], references: [id])
+  services       Service[]
+
+  @@unique([companyId, normalizedName])
+}
+
+model Product {
+  id        String   @id @default(cuid())
+  companyId String
+  internalCode Int?
+  catalogCode Int?
+  legacyInternalCode Int?
+  name      String
+  category  String?
+  categoryId String?
+  sku       String?
+  barcode   String?
+  brand     String?
+  brandId   String?
+  supplier  String?
+  supplierId String?
+  salePrice Decimal  @db.Decimal(10, 2)
+  costPrice Decimal? @db.Decimal(10, 2)
+  desiredMargin Decimal? @db.Decimal(5, 2)
+  stock     Decimal  @default(0) @db.Decimal(10, 3)
+  minStock  Decimal  @default(0) @db.Decimal(10, 3)
+  unit      String   @default("unidade")
+  allowNegativeStock Boolean @default(false)
+  active    Boolean  @default(true)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id])
+  categoryRef ProductCategory? @relation(fields: [categoryId], references: [id])
+  brandRef ProductBrand? @relation(fields: [brandId], references: [id])
+  supplierRef Supplier? @relation(fields: [supplierId], references: [id])
+  saleItems SaleItem[]
+  preSaleItems PreSaleItem[]
+  catalogItem CatalogItem?
+
+  @@unique([companyId, internalCode])
+  @@unique([companyId, catalogCode])
+}
+
+model CatalogItem {
+  id          String       @id @default(cuid())
+  companyId   String
+  catalogCode Int
+  itemType    SaleItemType
+  productId   String?      @unique
+  serviceId   String?      @unique
+  active      Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  company     Company      @relation(fields: [companyId], references: [id])
+  product     Product?     @relation(fields: [productId], references: [id])
+  service     Service?     @relation(fields: [serviceId], references: [id])
+
+  @@unique([companyId, catalogCode])
+  @@index([companyId, itemType])
+}
+
+model ProductCategory {
+  id             String   @id @default(cuid())
+  companyId      String
+  name           String
+  normalizedName String
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  company        Company  @relation(fields: [companyId], references: [id])
+  products       Product[]
+
+  @@unique([companyId, normalizedName])
+}
+
+model ProductBrand {
+  id             String   @id @default(cuid())
+  companyId      String
+  name           String
+  normalizedName String
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  company        Company  @relation(fields: [companyId], references: [id])
+  products       Product[]
+
+  @@unique([companyId, normalizedName])
+}
+
+model Supplier {
+  id             String   @id @default(cuid())
+  companyId      String
+  name           String
+  normalizedName String
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  company        Company  @relation(fields: [companyId], references: [id])
+  products       Product[]
+
+  @@unique([companyId, normalizedName])
+}
+
+model MembershipPlan {
+  id                     String   @id @default(cuid())
+  companyId              String
+  name                   String
+  serviceId              String
+  usageQuantity          Int
+  validityDays           Int
+  suggestedFrequencyDays Int
+  price                  Decimal  @db.Decimal(10, 2)
+  active                 Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  company                Company  @relation(fields: [companyId], references: [id])
+  service                Service  @relation(fields: [serviceId], references: [id])
+  memberships            CustomerMembership[]
+  renewals               MembershipRenewal[]
+}
+
+model CustomerMembership {
+  id            String           @id @default(cuid())
+  companyId     String
+  customerId    String
+  petId         String
+  planId        String
+  startDate     DateTime
+  endDate       DateTime
+  totalUses     Int
+  usedUses      Int              @default(0)
+  remainingUses Int
+  status        MembershipStatus @default(ACTIVE)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  customer      Customer         @relation(fields: [customerId], references: [id])
+  pet           Pet              @relation(fields: [petId], references: [id])
+  plan          MembershipPlan   @relation(fields: [planId], references: [id])
+  usages        MembershipUsage[]
+  appointments  Appointment[]
+  renewals      MembershipRenewal[]
+}
+
+model Appointment {
+  id            String            @id @default(cuid())
+  companyId     String
+  customerId    String
+  petId         String
+  serviceId     String
+  date          DateTime
+  startTime     String
+  endTime       String?
+  status        AppointmentStatus @default(SCHEDULED)
+  notes         String?
+  paymentStatus PaymentStatus     @default(PENDING)
+  paymentMode   AppointmentPaymentMode @default(AVULSO)
+  membershipId  String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  customer      Customer          @relation(fields: [customerId], references: [id])
+  pet           Pet               @relation(fields: [petId], references: [id])
+  service       Service           @relation(fields: [serviceId], references: [id])
+  membership    CustomerMembership? @relation(fields: [membershipId], references: [id])
+  membershipUsage MembershipUsage?
+  membershipRenewal MembershipRenewal?
+  extraServices AppointmentExtraService[]
+  sales         Sale[]
+
+  @@index([companyId, membershipId])
+}
+
+model AppointmentExtraService {
+  id            String      @id @default(cuid())
+  companyId     String
+  appointmentId String
+  serviceId     String
+  nameSnapshot  String
+  priceSnapshot Decimal     @db.Decimal(10, 2)
+  createdAt     DateTime    @default(now())
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  service       Service     @relation(fields: [serviceId], references: [id])
+
+  @@unique([appointmentId, serviceId])
+  @@index([companyId, appointmentId])
+}
+
+model MembershipRenewal {
+  id                    String                  @id @default(cuid())
+  companyId             String
+  customerId            String
+  petId                 String
+  planId                String
+  appointmentId         String                  @unique
+  membershipId          String?
+  status                MembershipRenewalStatus @default(PENDING_PAYMENT)
+  priceSnapshot         Decimal                 @db.Decimal(10, 2)
+  createdById           String?
+  paidAt                DateTime?
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  plan                  MembershipPlan          @relation(fields: [planId], references: [id])
+  appointment           Appointment             @relation(fields: [appointmentId], references: [id])
+  membership            CustomerMembership?     @relation(fields: [membershipId], references: [id])
+
+  @@index([companyId, customerId, petId, status])
+  @@index([companyId, planId])
+}
+
+model MembershipUsage {
+  id             String                @id @default(cuid())
+  companyId      String
+  membershipId   String
+  appointmentId  String                @unique
+  petId          String
+  serviceId      String
+  status         MembershipUsageStatus @default(RESERVED)
+  quantity       Int                   @default(1)
+  usageNumber    Int?
+  balanceBefore  Int
+  balanceAfter   Int?
+  operatorId     String?
+  reservedAt     DateTime              @default(now())
+  consumedAt     DateTime?
+  releasedAt     DateTime?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  membership     CustomerMembership    @relation(fields: [membershipId], references: [id])
+  appointment    Appointment           @relation(fields: [appointmentId], references: [id])
+
+  @@unique([membershipId, appointmentId])
+  @@index([companyId, membershipId, status])
+  @@index([companyId, petId])
+}
+
+model Sale {
+  id            String        @id @default(cuid())
+  companyId     String
+  internalCode  Int?
+  cashSessionId String?
+  preSaleId     String?
+  customerId    String?
+  petId         String?
+  appointmentId String?
+  subtotal      Decimal       @default(0) @db.Decimal(10, 2)
+  total         Decimal       @default(0) @db.Decimal(10, 2)
+  paidAmount    Decimal       @default(0) @db.Decimal(10, 2)
+  pendingAmount Decimal       @default(0) @db.Decimal(10, 2)
+  discount      Decimal       @default(0) @db.Decimal(10, 2)
+  discountType  DiscountType  @default(VALUE)
+  discountPercent Decimal?    @db.Decimal(5, 2)
+  paymentMethod PaymentMethod?
+  paymentStatus PaymentStatus @default(PAID)
+  status        SaleStatus    @default(PAID)
+  origin        SaleOrigin    @default(DIRECT)
+  pendingReason String?
+  pendingNotes  String?
+  pendingSince  DateTime?
+  expectedPaymentDate DateTime?
+  cancelReason  String?
+  cardBrand     String?
+  cardNsu       String?
+  cardAuthorization String?
+  operatorId    String?
+  operatorName  String?
+  paidAt        DateTime?
+  cancelledAt   DateTime?
+  stockProcessedAt DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  customer      Customer?     @relation(fields: [customerId], references: [id])
+  pet           Pet?          @relation(fields: [petId], references: [id])
+  appointment   Appointment?  @relation(fields: [appointmentId], references: [id])
+  cashSession   CashSession?  @relation(fields: [cashSessionId], references: [id])
+  preSale       PreSale?      @relation(fields: [preSaleId], references: [id])
+  items         SaleItem[]
+  payments      SalePayment[]
+  receipt       SalesReceipt?
+
+  @@unique([companyId, internalCode])
+  @@unique([companyId, appointmentId])
+  @@index([companyId, status])
+  @@index([companyId, status, pendingSince])
+  @@index([companyId, expectedPaymentDate])
+  @@index([companyId, customerId])
+  @@index([companyId, petId])
+  @@index([companyId, cashSessionId])
+  @@index([companyId, preSaleId])
+}
+
+model SalesReceipt {
+  id                     String   @id @default(cuid())
+  companyId              String
+  receiptCode            Int
+  saleId                 String   @unique
+  customerId             String?
+  petId                  String?
+  cashSessionId          String?
+  operatorId             String?
+  companyNameSnapshot    String
+  companyDocumentSnapshot String?
+  companyAddressSnapshot String?
+  customerCodeSnapshot   Int?
+  customerNameSnapshot   String?
+  petNameSnapshot        String?
+  operatorNameSnapshot   String?
+  itemsSnapshot          Json
+  paymentsSnapshot       Json
+  subtotal               Decimal  @db.Decimal(10, 2)
+  discount               Decimal  @db.Decimal(10, 2)
+  total                  Decimal  @db.Decimal(10, 2)
+  paidAmount             Decimal  @db.Decimal(10, 2)
+  status                 String   @default("ACTIVE")
+  issuedAt               DateTime @default(now())
+  createdAt              DateTime @default(now())
+  fiscalDocumentType     String?
+  fiscalNumber           String?
+  fiscalSeries           String?
+  fiscalAccessKey        String?
+  fiscalStatus           String?
+  fiscalAuthorizedAt     DateTime?
+  fiscalXmlUrl           String?
+  fiscalPdfUrl           String?
+  company                Company  @relation(fields: [companyId], references: [id])
+  sale                   Sale     @relation(fields: [saleId], references: [id])
+
+  @@unique([companyId, receiptCode])
+  @@index([companyId, issuedAt])
+}
+
+model SalePayment {
+  id                String        @id @default(cuid())
+  companyId         String
+  saleId            String
+  cashSessionId     String?
+  method            PaymentMethod
+  amount            Decimal       @db.Decimal(10, 2)
+  cardBrand         String?
+  cardNsu           String?
+  cardAuthorization String?
+  installments      Int?
+  pixReference      String?
+  cashReceived      Decimal?      @db.Decimal(10, 2)
+  changeAmount      Decimal?      @db.Decimal(10, 2)
+  operatorId        String?
+  operatorName      String?
+  financialPaymentMethodId String?
+  paymentMethodNameSnapshot String?
+  paymentTypeSnapshot String?
+  institutionNameSnapshot String?
+  destinationAccountId String?
+  grossAmount Decimal? @db.Decimal(10, 2)
+  feePercentageSnapshot Decimal? @db.Decimal(7, 4)
+  fixedFeeSnapshot Decimal? @db.Decimal(10, 2)
+  feeAmount Decimal? @db.Decimal(10, 2)
+  netAmount Decimal? @db.Decimal(10, 2)
+  settlementDaysSnapshot Int?
+  expectedSettlementDate DateTime?
+  cardBrandSnapshot String?
+  paidAt            DateTime      @default(now())
+  sale              Sale          @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  cashSession       CashSession?  @relation(fields: [cashSessionId], references: [id])
+  financialPaymentMethod FinancialPaymentMethod? @relation(fields: [financialPaymentMethodId], references: [id])
+  destinationAccount FinancialAccount? @relation(fields: [destinationAccountId], references: [id])
+
+  @@index([companyId, saleId])
+  @@index([companyId, cashSessionId])
+  @@index([companyId, expectedSettlementDate])
+  @@index([companyId, destinationAccountId])
+}
+
+model FinancialAccount {
+  id String @id @default(cuid())
+  companyId String
+  name String
+  type FinancialAccountType
+  institutionName String?
+  agency String?
+  accountNumber String?
+  internalIdentifier String?
+  openingBalance Decimal @default(0) @db.Decimal(12, 2)
+  openingBalanceDate DateTime
+  isPrimary Boolean @default(false)
+  active Boolean @default(true)
+  notes String?
+  createdById String?
+  updatedById String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company Company @relation(fields: [companyId], references: [id])
+  paymentMethods FinancialPaymentMethod[]
+  salePayments SalePayment[]
+
+  @@unique([companyId, name])
+  @@index([companyId, active])
+}
+
+model FinancialPaymentMethod {
+  id String @id @default(cuid())
+  companyId String
+  name String
+  type FinancialPaymentType
+  institutionName String?
+  destinationAccountId String
+  defaultFeePercentage Decimal @default(0) @db.Decimal(7, 4)
+  fixedFee Decimal @default(0) @db.Decimal(10, 2)
+  settlementDays Int @default(0)
+  settlementDayType SettlementDayType @default(CALENDAR)
+  maxInstallments Int @default(1)
+  requiresNsu Boolean @default(false)
+  requiresReceiptCode Boolean @default(false)
+  active Boolean @default(true)
+  notes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company Company @relation(fields: [companyId], references: [id])
+  destinationAccount FinancialAccount @relation(fields: [destinationAccountId], references: [id])
+  brands PaymentMethodBrand[]
+  feeRules PaymentFeeRule[]
+  salePayments SalePayment[]
+
+  @@unique([companyId, name])
+  @@index([companyId, active, type])
+}
+
+model PaymentMethodBrand {
+  id String @id @default(cuid())
+  companyId String
+  paymentMethodId String
+  brandName String
+  active Boolean @default(true)
+  paymentMethod FinancialPaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id])
+  feeRules PaymentFeeRule[]
+
+  @@unique([paymentMethodId, brandName])
+  @@index([companyId, paymentMethodId])
+}
+
+model PaymentFeeRule {
+  id String @id @default(cuid())
+  companyId String
+  paymentMethodId String
+  cardBrandId String?
+  installments Int?
+  feePercentage Decimal @default(0) @db.Decimal(7, 4)
+  fixedFee Decimal @default(0) @db.Decimal(10, 2)
+  settlementDays Int @default(0)
+  settlementDayType SettlementDayType @default(CALENDAR)
+  effectiveFrom DateTime
+  effectiveUntil DateTime?
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company Company @relation(fields: [companyId], references: [id])
+  paymentMethod FinancialPaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Cascade)
+  cardBrand PaymentMethodBrand? @relation(fields: [cardBrandId], references: [id])
+
+  @@index([companyId, paymentMethodId, active])
+  @@index([paymentMethodId, installments, effectiveFrom])
+}
+
+model CashSession {
+  id                 String            @id @default(cuid())
+  companyId          String
+  internalCode       Int?
+  status             CashSessionStatus @default(OPEN)
+  openedById         String?
+  openedByName       String?
+  closedById         String?
+  closedByName       String?
+  openingAmount      Decimal           @default(0) @db.Decimal(10, 2)
+  closingCashAmount  Decimal?          @db.Decimal(10, 2)
+  expectedCashAmount Decimal?          @db.Decimal(10, 2)
+  difference         Decimal?          @db.Decimal(10, 2)
+  differenceReason   String?
+  notes              String?
+  openedAt           DateTime          @default(now())
+  closedAt           DateTime?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  company            Company           @relation(fields: [companyId], references: [id])
+  sales              Sale[]
+  payments           SalePayment[]
+  movements          CashMovement[]
+
+  @@unique([companyId, internalCode])
+  @@index([companyId, status])
+}
+
+model CashMovement {
+  id            String           @id @default(cuid())
+  companyId     String
+  cashSessionId String
+  internalCode  Int?
+  type          CashMovementType
+  amount        Decimal          @db.Decimal(10, 2)
+  reason        String
+  notes         String?
+  originAccount String?
+  destinationAccount String?
+  transferId    String?
+  authorizedByName String?
+  operatorId    String?
+  operatorName  String?
+  createdAt     DateTime         @default(now())
+  company       Company          @relation(fields: [companyId], references: [id])
+  cashSession   CashSession      @relation(fields: [cashSessionId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, cashSessionId])
+  @@unique([companyId, internalCode])
+}
+
+model PreSale {
+  id              String        @id @default(cuid())
+  companyId       String
+  internalCode    Int?
+  customerId      String?
+  petId           String?
+  operatorId      String?
+  operatorName    String?
+  status          PreSaleStatus @default(OPEN)
+  expiresAt       DateTime?
+  subtotal        Decimal       @default(0) @db.Decimal(10, 2)
+  discount        Decimal       @default(0) @db.Decimal(10, 2)
+  total           Decimal       @default(0) @db.Decimal(10, 2)
+  notes           String?
+  convertedSaleId String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  company         Company       @relation(fields: [companyId], references: [id])
+  customer        Customer?     @relation(fields: [customerId], references: [id])
+  pet             Pet?          @relation(fields: [petId], references: [id])
+  items           PreSaleItem[]
+  sales           Sale[]
+
+  @@unique([companyId, internalCode])
+  @@index([companyId, status])
+}
+
+model PreSaleItem {
+  id          String       @id @default(cuid())
+  companyId   String
+  preSaleId   String
+  itemType    SaleItemType
+  serviceId   String?
+  productId   String?
+  description String
+  quantity    Int
+  unitPrice   Decimal      @db.Decimal(10, 2)
+  discount    Decimal      @default(0) @db.Decimal(10, 2)
+  total       Decimal      @db.Decimal(10, 2)
+  createdAt   DateTime     @default(now())
+  preSale     PreSale      @relation(fields: [preSaleId], references: [id], onDelete: Cascade)
+  service     Service?     @relation(fields: [serviceId], references: [id])
+  product     Product?     @relation(fields: [productId], references: [id])
+
+  @@index([companyId, preSaleId])
+}
+
+model SaleItem {
+  id          String       @id @default(cuid())
+  companyId   String
+  saleId      String
+  itemType    SaleItemType
+  serviceId   String?
+  productId   String?
+  description String
+  quantity    Int
+  unitPrice   Decimal      @db.Decimal(10, 2)
+  total       Decimal      @db.Decimal(10, 2)
+  coveredByMembership Boolean @default(false)
+  createdAt   DateTime     @default(now())
+  sale        Sale         @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  service     Service?     @relation(fields: [serviceId], references: [id])
+  product     Product?     @relation(fields: [productId], references: [id])
+}
+
+model SyncOperation {
+  id             String   @id
+  companyId      String
+  userId         String
+  idempotencyKey String
+  entityType     String
+  entityId       String
+  action         String
+  payloadHash    String
+  status         String   @default("PROCESSING")
+  result         Json?
+  errorCode      String?
+  receivedAt     DateTime @default(now())
+  processedAt    DateTime?
+
+  @@unique([companyId, idempotencyKey])
+  @@index([companyId, status, receivedAt])
+}
+
+model CustomerHistory {
+  id          String   @id @default(cuid())
+  companyId   String
+  customerId  String
+  petId       String?
+  type        String
+  title       String
+  description String?
+  amount      Decimal? @db.Decimal(10, 2)
+  appointmentId String?
+  saleId      String?
+  membershipId String?
+  createdAt   DateTime @default(now())
+  customer    Customer @relation(fields: [customerId], references: [id])
+  pet         Pet?     @relation(fields: [petId], references: [id])
+
+  @@index([companyId, appointmentId])
+  @@index([companyId, saleId])
+  @@index([companyId, membershipId])
+}

@@ -1,0 +1,3 @@
+-- Seed opcional para desenvolvimento Supabase.
+-- O seed principal do projeto continua em apps/api/prisma/seed.ts para preservar a arquitetura atual.
+-- Crie o primeiro usuário pelo Supabase Auth ou pela rota atual /auth/register enquanto a migração de Auth não for concluída.

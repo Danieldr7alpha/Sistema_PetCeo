@@ -1,0 +1,9 @@
+{
+  "name": "CEO Pet AI",
+  "short_name": "CEO Pet AI",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#1d4ed8",
+  "icons": [{ "src": "/pwa-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

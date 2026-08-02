@@ -1,0 +1,31 @@
+{
+  "name": "ceo-pet-ai",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n API,WEB -c blue,green \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "npm run dev -w apps/api",
+    "dev:web": "npm run dev -w apps/web",
+    "dev:web:launcher": "npm run dev:launcher -w apps/web",
+    "build": "npm run build -w apps/api && npm run build -w apps/web",
+    "setup": "npm run db:generate && npm run db:push && npm run db:seed",
+    "db:generate": "npm run prisma:generate -w apps/api",
+    "db:push": "npm run prisma:push -w apps/api",
+    "db:migrate": "npm run prisma:migrate -w apps/api",
+    "db:deploy": "npm run prisma:deploy -w apps/api",
+    "db:check": "npm run db:check -w apps/api",
+    "db:seed": "npm run prisma:seed -w apps/api",
+    "db:studio": "npm run prisma:studio -w apps/api",
+    "db:backup": "powershell -ExecutionPolicy Bypass -File scripts/backup-db.ps1",
+    "supabase:link": "npx supabase link",
+    "supabase:db:push": "npx supabase db push",
+    "supabase:types": "npx supabase gen types typescript --linked > apps/web/src/lib/supabase.types.ts"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
