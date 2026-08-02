@@ -132,11 +132,19 @@ function formatCpf(value: string) {
     .replace(/^(\d{3})\.(\d{3})\.(\d{3})(\d)/, "$1.$2.$3-$4");
 }
 
+function formatCnpj(value: string) {
+  const digits = onlyDigits(value, 14);
+  return digits
+    .replace(/^(\d{2})(\d)/, "$1.$2")
+    .replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
+    .replace(/\.(\d{3})(\d)/, ".$1/$2")
+    .replace(/(\d{4})(\d)/, "$1-$2");
+}
+
 function formatPhone(value: string) {
   const digits = onlyDigits(value, 11);
-  return digits
-    .replace(/^(\d{2})(\d)/, "($1) $2")
-    .replace(/^(\(\d{2}\) \d{5})(\d)/, "$1-$2");
+  if (digits.length <= 10) return digits.replace(/^(\d{2})(\d)/, "($1) $2").replace(/(\d{4})(\d)/, "$1-$2");
+  return digits.replace(/^(\d{2})(\d)/, "($1) $2").replace(/(\d{5})(\d)/, "$1-$2");
 }
 
 function formatCep(value: string) {
@@ -478,34 +486,155 @@ function useData<T>(path: string, deps: unknown[] = []) {
   return { data, error, loading, refreshing, refresh: () => setRefreshKey((key) => key + 1) };
 }
 
+type RegistrationForm = {
+  legalName: string; tradeName: string; cnpj: string; stateRegistration: string; municipalRegistration: string; taxRegime: string;
+  zipCode: string; street: string; number: string; complement: string; neighborhood: string; city: string; state: string; country: string;
+  landline: string; mobile: string; site: string; instagram: string; facebook: string;
+  responsibleName: string; responsibleCpf: string; responsibleRole: string; responsibleEmail: string; responsibleMobile: string;
+  email: string; password: string; confirmPassword: string;
+};
+
+const emptyRegistration: RegistrationForm = {
+  legalName: "", tradeName: "", cnpj: "", stateRegistration: "", municipalRegistration: "", taxRegime: "",
+  zipCode: "", street: "", number: "", complement: "", neighborhood: "", city: "", state: "", country: "Brasil",
+  landline: "", mobile: "", site: "", instagram: "", facebook: "",
+  responsibleName: "", responsibleCpf: "", responsibleRole: "", responsibleEmail: "", responsibleMobile: "",
+  email: "", password: "", confirmPassword: ""
+};
+
 function Login({ onSession }: { onSession: (session: Session) => void }) {
   const [mode, setMode] = useState<"login" | "register">("login");
-  const [form, setForm] = useState({ companyName: "Pet Shop Modelo", name: "Admin CEO Pet", email: "", password: "" });
+  const [loginForm, setLoginForm] = useState({ email: "", password: "" });
+  const [form, setForm] = useState<RegistrationForm>(emptyRegistration);
   const [error, setError] = useState("");
+  const [lookingUpCep, setLookingUpCep] = useState(false);
+  const update = (field: keyof RegistrationForm, value: string) => {
+    const formatted = field === "cnpj" ? formatCnpj(value)
+      : field === "responsibleCpf" ? formatCpf(value)
+      : field === "zipCode" ? formatCep(value)
+      : ["landline", "mobile", "responsibleMobile"].includes(field) ? formatPhone(value)
+      : field === "state" ? value.replace(/[^a-z]/gi, "").slice(0, 2).toUpperCase()
+      : value;
+    setForm((current) => ({ ...current, [field]: formatted }));
+  };
+
+  async function lookupCep() {
+    const cep = onlyDigits(form.zipCode);
+    if (cep.length !== 8) return;
+    setLookingUpCep(true);
+    setError("");
+    try {
+      const response = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+      if (!response.ok) throw new Error("Não foi possível consultar o CEP.");
+      const address = await response.json() as { erro?: boolean; logradouro?: string; complemento?: string; bairro?: string; localidade?: string; uf?: string };
+      if (address.erro) throw new Error("CEP não encontrado.");
+      setForm((current) => ({
+        ...current,
+        street: address.logradouro || current.street,
+        complement: current.complement || address.complemento || "",
+        neighborhood: address.bairro || current.neighborhood,
+        city: address.localidade || current.city,
+        state: address.uf || current.state
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível consultar o CEP.");
+    } finally {
+      setLookingUpCep(false);
+    }
+  }
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
     try {
-      const session = await api<Session>(mode === "login" ? "/auth/login" : "/auth/register", { method: "POST", body: JSON.stringify(form) });
+      if (mode === "register" && form.password !== form.confirmPassword) throw new Error("As senhas não conferem.");
+      const payload = mode === "login" ? loginForm : {
+        ...form,
+        cnpj: onlyDigits(form.cnpj), zipCode: onlyDigits(form.zipCode), mobile: onlyDigits(form.mobile), landline: onlyDigits(form.landline),
+        responsibleCpf: onlyDigits(form.responsibleCpf), responsibleMobile: onlyDigits(form.responsibleMobile),
+        state: form.state.toUpperCase(), confirmPassword: undefined
+      };
+      const session = await api<Session>(mode === "login" ? "/auth/login" : "/auth/register", { method: "POST", body: JSON.stringify(payload) });
       localStorage.setItem("ceo-pet-session", JSON.stringify(session));
       onSession(session);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha no acesso");
     }
   }
-  return <main className="grid min-h-screen place-items-center bg-slate-100 p-4">
+  if (mode === "login") return <main className="grid min-h-screen place-items-center bg-slate-100 p-4">
     <form onSubmit={submit} className="panel w-full max-w-md p-6 shadow-sm">
       <h1 className="text-2xl font-semibold">CEO Pet AI</h1>
       <p className="mt-1 text-sm text-slate-500">Acesse o painel operacional do pet shop.</p>
       <div className="mt-5 grid gap-3">
-        {mode === "register" && <input className="field" placeholder="Nome da empresa" value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} />}
-        {mode === "register" && <input className="field" placeholder="Seu nome" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />}
-        <input className="field" placeholder="E-mail" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-        <input className="field" placeholder="Senha" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+        <input className="field" aria-label="E-mail" autoComplete="username" placeholder="E-mail" type="email" required value={loginForm.email} onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })} />
+        <input className="field" aria-label="Senha" autoComplete="current-password" placeholder="Senha" type="password" required value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} />
       </div>
       {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      <button className="btn btn-primary mt-5 w-full" type="submit">{mode === "login" ? "Entrar" : "Criar empresa"}</button>
-      <button className="btn btn-secondary mt-3 w-full" type="button" onClick={() => setMode(mode === "login" ? "register" : "login")}>{mode === "login" ? "Criar primeira conta" : "Voltar para login"}</button>
+      <button className="btn btn-primary mt-5 w-full" type="submit">Entrar</button>
+      <button className="btn btn-secondary mt-3 w-full" type="button" onClick={() => { setError(""); setMode("register"); }}>Criar primeira conta</button>
+    </form>
+  </main>;
+
+  const field = (label: string, name: keyof RegistrationForm, options?: { type?: string; required?: boolean; placeholder?: string; autoComplete?: string; onBlur?: () => void }) =>
+    <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+      <span>{label}{options?.required !== false && <span className="ml-1 text-red-500">*</span>}</span>
+      <input className="field" type={options?.type ?? "text"} required={options?.required !== false} placeholder={options?.placeholder} autoComplete={options?.autoComplete} value={form[name]} onBlur={options?.onBlur} onChange={(event) => update(name, event.target.value)} />
+    </label>;
+
+  return <main className="min-h-screen bg-slate-100 px-4 py-8 sm:px-6 lg:py-12">
+    <form onSubmit={submit} className="panel mx-auto w-full max-w-5xl overflow-hidden shadow-sm">
+      <header className="border-b border-slate-200 bg-white px-6 py-6 sm:px-8">
+        <p className="text-sm font-semibold text-brand-600">CEO Pet AI</p>
+        <h1 className="mt-1 text-2xl font-semibold text-slate-900">Cadastre sua empresa</h1>
+        <p className="mt-1 text-sm text-slate-500">Preencha os dados abaixo para preparar o acesso ao sistema.</p>
+      </header>
+      <div className="grid gap-8 p-6 sm:p-8">
+        <section>
+          <h2 className="text-lg font-semibold">Dados da empresa</h2><p className="mb-4 text-sm text-slate-500">Informações básicas e fiscais.</p>
+          <div className="grid gap-4 md:grid-cols-2">
+            {field("Nome da empresa (Razão Social)", "legalName", { autoComplete: "organization" })}
+            {field("Nome Fantasia", "tradeName")}
+            {field("CNPJ", "cnpj", { placeholder: "00.000.000/0000-00" })}
+            {field("Inscrição Estadual", "stateRegistration", { required: false })}
+            {field("Inscrição Municipal", "municipalRegistration", { required: false })}
+            <label className="grid gap-1.5 text-sm font-medium text-slate-700"><span>Regime Tributário <span className="ml-1 text-red-500">*</span></span><select className="field" required value={form.taxRegime} onChange={(event) => update("taxRegime", event.target.value)}><option value="">Selecione</option><option value="MEI">MEI</option><option value="SIMPLES_NACIONAL">Simples Nacional</option><option value="LUCRO_PRESUMIDO">Lucro Presumido</option><option value="LUCRO_REAL">Lucro Real</option></select></label>
+          </div>
+        </section>
+        <section className="border-t border-slate-200 pt-8">
+          <h2 className="text-lg font-semibold">Endereço</h2><p className="mb-4 text-sm text-slate-500">Digite o CEP para preencher o endereço automaticamente.</p>
+          <div className="grid gap-4 md:grid-cols-6">
+            <div className="md:col-span-2">{field(lookingUpCep ? "Consultando CEP..." : "CEP", "zipCode", { placeholder: "00000-000", autoComplete: "postal-code", onBlur: lookupCep })}</div>
+            <div className="md:col-span-4">{field("Rua", "street", { autoComplete: "address-line1" })}</div>
+            <div className="md:col-span-2">{field("Número", "number")}</div><div className="md:col-span-4">{field("Complemento", "complement", { required: false, autoComplete: "address-line2" })}</div>
+            <div className="md:col-span-2">{field("Bairro", "neighborhood")}</div><div className="md:col-span-2">{field("Cidade", "city", { autoComplete: "address-level2" })}</div><div className="md:col-span-1">{field("Estado (UF)", "state", { autoComplete: "address-level1" })}</div><div className="md:col-span-1">{field("País", "country", { autoComplete: "country-name" })}</div>
+          </div>
+        </section>
+        <section className="border-t border-slate-200 pt-8">
+          <h2 className="text-lg font-semibold">Contato</h2><p className="mb-4 text-sm text-slate-500">Canais oficiais da empresa.</p>
+          <div className="grid gap-4 md:grid-cols-2">
+            {field("Telefone fixo", "landline", { required: false, type: "tel" })}{field("Celular / WhatsApp", "mobile", { type: "tel" })}
+            {field("Site", "site", { required: false, type: "url", placeholder: "https://" })}{field("Instagram", "instagram", { required: false, placeholder: "@suaempresa" })}{field("Facebook", "facebook", { required: false })}
+          </div>
+        </section>
+        <section className="border-t border-slate-200 pt-8">
+          <h2 className="text-lg font-semibold">Dados do responsável</h2><p className="mb-4 text-sm text-slate-500">Pessoa responsável pela empresa e pelo cadastro.</p>
+          <div className="grid gap-4 md:grid-cols-2">
+            {field("Nome do responsável", "responsibleName", { autoComplete: "name" })}{field("CPF", "responsibleCpf", { placeholder: "000.000.000-00" })}{field("Cargo", "responsibleRole")}{field("E-mail", "responsibleEmail", { type: "email", autoComplete: "email" })}{field("Celular", "responsibleMobile", { type: "tel", autoComplete: "tel" })}
+          </div>
+        </section>
+        <section className="rounded-lg border border-brand-100 bg-brand-50/50 p-5 sm:p-6">
+          <h2 className="text-lg font-semibold">Acesso ao sistema</h2><p className="mb-4 text-sm text-slate-600">Defina o e-mail e a senha que serão usados para entrar no CEO Pet AI.</p>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="md:col-span-2">{field("E-mail de acesso", "email", { type: "email", autoComplete: "username" })}</div>
+            {field("Criar senha", "password", { type: "password", autoComplete: "new-password", placeholder: "Mínimo de 6 caracteres" })}{field("Confirmar senha", "confirmPassword", { type: "password", autoComplete: "new-password" })}
+          </div>
+        </section>
+        {error && <p className="rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+        <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-6 sm:flex-row sm:justify-end">
+          <button className="btn btn-secondary px-6" type="button" onClick={() => { setError(""); setMode("login"); }}>Voltar para login</button>
+          <button className="btn btn-primary px-8" type="submit">Criar empresa e acessar</button>
+        </div>
+      </div>
     </form>
   </main>;
 }

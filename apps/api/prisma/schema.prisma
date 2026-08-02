@@ -172,11 +172,34 @@ enum SettlementDayType {
 }
 
 model Company {
-  id        String   @id @default(cuid())
-  name      String
-  document  String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                    String   @id @default(cuid())
+  name                  String
+  document              String?
+  legalName             String?
+  tradeName             String?
+  stateRegistration     String?
+  municipalRegistration String?
+  taxRegime             String?
+  zipCode               String?
+  street                String?
+  number                String?
+  complement            String?
+  neighborhood          String?
+  city                  String?
+  state                 String?
+  country               String   @default("Brasil")
+  landline              String?
+  mobile                String?
+  site                  String?
+  instagram             String?
+  facebook              String?
+  responsibleName       String?
+  responsibleCpf        String?
+  responsibleRole       String?
+  responsibleEmail      String?
+  responsibleMobile     String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
   users     User[]
   customers Customer[]
   pets      Pet[]
