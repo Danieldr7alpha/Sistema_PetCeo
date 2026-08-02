@@ -480,7 +480,7 @@ function useData<T>(path: string, deps: unknown[] = []) {
 
 function Login({ onSession }: { onSession: (session: Session) => void }) {
   const [mode, setMode] = useState<"login" | "register">("login");
-  const [form, setForm] = useState({ companyName: "Pet Shop Modelo", name: "Admin CEO Pet", email: "admin@ceopet.ai", password: "admin123" });
+  const [form, setForm] = useState({ companyName: "Pet Shop Modelo", name: "Admin CEO Pet", email: "", password: "" });
   const [error, setError] = useState("");
   async function submit(event: React.FormEvent) {
     event.preventDefault();
