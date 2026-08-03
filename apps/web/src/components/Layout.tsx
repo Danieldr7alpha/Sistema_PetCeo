@@ -60,7 +60,7 @@ export function Layout({ session, active, onNavigate, onLogout, children }: Prop
           if (item.key === "checkout") {
             return (
               <div key={item.key}>
-                <button className={`btn w-full justify-start ${selected ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => { setCashOpen(!cashOpen); if (!selected) onNavigate("checkout"); }}>
+                <button className={`btn w-full !justify-start text-left ${selected ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => { setCashOpen(!cashOpen); if (!selected) onNavigate("checkout"); }}>
                   <Icon size={18} /> {item.label} <span className="ml-auto">{cashOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</span>
                 </button>
                 {cashOpen && <div className="mt-1 grid gap-1 pl-7">
@@ -74,14 +74,14 @@ export function Layout({ session, active, onNavigate, onLogout, children }: Prop
           }
           if (item.key === "financial") {
             return <div key={item.key}>
-              <button className={`btn w-full justify-start ${selected ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => { setFinancialOpen(!financialOpen); if (!selected) onNavigate("financial"); }}>
+              <button className={`btn w-full !justify-start text-left ${selected ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => { setFinancialOpen(!financialOpen); if (!selected) onNavigate("financial"); }}>
                 <Icon size={18} /> {item.label} <span className="ml-auto">{financialOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</span>
               </button>
               {financialOpen && <div className="mt-1 grid gap-1 pl-7">{financialSubmenus.map((submenu) => <button key={submenu.key} className={`rounded-lg px-3 py-2 text-left text-sm ${active === submenu.key ? "bg-brand-100 font-semibold text-brand-700" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => { onNavigate(submenu.key); setOpen(false); }}>{submenu.label}</button>)}</div>}
             </div>;
           }
           return (
-            <button key={item.key} className={`btn w-full justify-start ${selected ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => { onNavigate(item.key); setOpen(false); }}>
+            <button key={item.key} className={`btn w-full !justify-start text-left ${selected ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => { onNavigate(item.key); setOpen(false); }}>
               <Icon size={18} /> {item.label}
             </button>
           );
