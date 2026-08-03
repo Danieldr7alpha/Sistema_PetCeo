@@ -390,6 +390,10 @@ function cashSessionCode(session?: Pick<CashSession, "internalCode"> | null) {
   return session?.internalCode ? `CXA-${String(session.internalCode).padStart(6, "0")}` : "-";
 }
 
+function closingReportCode(session?: Pick<CashSession, "internalCode"> | null) {
+  return `RFC-${String(session?.internalCode ?? 0).padStart(6, "0")}`;
+}
+
 function preSaleCode(preSale?: Pick<PreSale, "internalCode"> | null) {
   return preSale?.internalCode ? `PRE-${String(preSale.internalCode).padStart(6, "0")}` : "-";
 }
@@ -1795,11 +1799,12 @@ function CatalogModal({ type, mode, item, adminPassword, productOptions, onClose
   </form></Modal>;
 }
 
-type CashSectionKey = "pos" | "session" | "sales" | "preSales" | "pending" | "movements" | "withdrawal" | "supply" | "reports";
+type CashSectionKey = "pos" | "session" | "sales" | "preSales" | "pending" | "movements" | "withdrawal" | "supply" | "reports" | "closingReports";
 
 function checkoutSectionFromPage(page: string): CashSectionKey {
   if (page === "checkout:pending") return "pending";
   if (page === "checkout:reports") return "reports";
+  if (page === "checkout:closing-reports") return "closingReports";
   if (page === "checkout:withdrawal") return "withdrawal";
   if (page === "checkout:supply") return "supply";
   if (page === "checkout:transfer" || page === "checkout:consumption") return "movements";
@@ -1818,6 +1823,7 @@ function Checkout({ draft, chargeSaleId, onClearDraft, session, sectionPage }: {
   const [loadedSale, setLoadedSale] = useState<Sale | null>(null);
   const [saleLoadError, setSaleLoadError] = useState("");
   const [closedReportSession, setClosedReportSession] = useState<CashSession | null>(null);
+  const [closeConfirmationOpen, setCloseConfirmationOpen] = useState(false);
   const search = query.trim();
   const { data: cashCurrent, error: cashCurrentError, loading: cashCurrentLoading, refresh: refreshCash } = useData<CashCurrent>("/cash/current");
   const cashSession = cashCurrent?.session ?? null;
@@ -1902,7 +1908,7 @@ function Checkout({ draft, chargeSaleId, onClearDraft, session, sectionPage }: {
     {section === "pos" && cashStateReady && <CashPointOfSaleLayout cashSession={cashSession} query={query} setQuery={setQuery} loadedSale={loadedSale} waitingSales={waitingSales ?? []} pendingSales={[...(partialSales ?? []), ...(pendingSales ?? [])]} onOpened={refreshCash} onShortcut={setSection} onOpenSale={openSaleInPos} onSaved={clearLoadedSale} session={session} />}
     {section === "session" && cashStateReady && (closedReportSession
       ? <CashReports isAdmin={session.user.role === "ADMIN"} cashSession={closedReportSession} closingReport onDismiss={() => setClosedReportSession(null)} />
-      : <CashSessionPanel cashSession={cashSession} onRefresh={refreshCash} onClosed={setClosedReportSession} />)}
+      : <CashSessionPanel cashSession={cashSession} onRefresh={refreshCash} onClosed={(closed) => { setClosedReportSession(closed); setCloseConfirmationOpen(true); }} />)}
     {section === "sales" && <CashSalesHistory />}
     {section === "preSales" && <CashPreSales onReceive={(sale) => setSaleModal({ sale })} />}
     {section === "pending" && <CashPendingSales onOpenInPos={openSaleInPos} />}
@@ -1910,8 +1916,10 @@ function Checkout({ draft, chargeSaleId, onClearDraft, session, sectionPage }: {
     {section === "withdrawal" && cashStateReady && <CashMovements key="withdrawal" cashSession={cashSession} onRefresh={refreshCash} fixedType="CASH_OUT" />}
     {section === "supply" && cashStateReady && <CashMovements key="supply" cashSession={cashSession} onRefresh={refreshCash} fixedType="CASH_IN" />}
     {section === "reports" && <CashReports isAdmin={session.user.role === "ADMIN"} cashSession={cashSession} />}
+    {section === "closingReports" && <CashClosingReports isAdmin={session.user.role === "ADMIN"} />}
 
     {saleModal && <SaleReceiveModal sale={saleModal.sale} session={session} cashSession={cashSession} onClose={() => setSaleModal(null)} onSaved={() => { setSaleModal(null); refreshPos(); }} />}
+    {closeConfirmationOpen && closedReportSession && <Modal title="Caixa fechado" onClose={() => { setCloseConfirmationOpen(false); setClosedReportSession(null); }}><div className="grid gap-4"><p>O caixa foi fechado com sucesso. O relatório <b>{closingReportCode(closedReportSession)}</b> foi salvo.</p><div className="flex justify-end gap-2"><button className="btn btn-secondary" type="button" onClick={() => { setCloseConfirmationOpen(false); setClosedReportSession(null); }}>Concluir</button><button className="btn btn-primary" type="button" onClick={() => window.print()}>Imprimir relatório do caixa</button></div></div></Modal>}
   </Page>;
 }
 
@@ -3185,6 +3193,16 @@ function CashSalesHistory() {
   </div>;
 }
 
+function CashClosingReports({ isAdmin }: { isAdmin: boolean }) {
+  const [date, setDate] = useState(localDateInput());
+  const [selected, setSelected] = useState<CashSession | null>(null);
+  const { data, loading } = useData<CashReport>(isAdmin ? `/cash/reports/summary?from=${date}&to=${date}` : "", [isAdmin, date]);
+  const sessions = (data?.sessions ?? []).filter((item) => item.status === "CLOSED");
+  if (!isAdmin) return <div className="panel p-4 text-sm text-slate-600">Relatórios são visíveis apenas para administradores.</div>;
+  if (selected) return <CashReports isAdmin cashSession={selected} closingReport onDismiss={() => setSelected(null)} />;
+  return <div className="grid gap-4"><div className="panel p-4"><label className="text-sm font-medium">Data do fechamento<input className="field mt-1" type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label></div>{loading && <div className="panel p-4 text-sm text-slate-500">Buscando relatórios...</div>}{!loading && sessions.map((item) => <div className="panel flex flex-wrap items-center justify-between gap-3 p-4" key={item.id}><div><h3 className="font-semibold">{closingReportCode(item)}</h3><p className="text-sm text-slate-600">Caixa {cashSessionCode(item)} · Abertura: {dateTimeBR(item.openedAt)} · Fechamento: {item.closedAt ? dateTimeBR(item.closedAt) : "-"}</p><p className="text-sm text-slate-600">Operador: {item.openedByName ?? "-"}</p></div><button className="btn btn-primary" type="button" onClick={() => setSelected(item)}>Ver relatório</button></div>)}{!loading && !sessions.length && <div className="panel p-4 text-sm text-slate-500">Nenhum relatório de fechamento encontrado nesta data.</div>}</div>;
+}
+
 function CashReports({ isAdmin, cashSession, closingReport = false, onDismiss }: { isAdmin: boolean; cashSession: CashSession | null; closingReport?: boolean; onDismiss?: () => void }) {
   const [period, setPeriod] = useState("today");
   const [customFrom, setCustomFrom] = useState(localDateInput());
@@ -3217,10 +3235,11 @@ function CashReports({ isAdmin, cashSession, closingReport = false, onDismiss }:
     { label: "Total", value: reportData?.totalReceived ?? 0 }
   ];
   if (!isAdmin) return <div className="panel p-4 text-sm text-slate-600">Relatórios são visíveis apenas para administradores.</div>;
-  return <div className="grid gap-4">
-    {closingReport && <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-semibold">Relatório de fechamento</h2><p className="text-sm text-slate-500">Movimentações registradas durante a operação deste caixa.</p></div>{onDismiss && <button className="btn btn-secondary" type="button" onClick={onDismiss}>Concluir</button>}</div>}
+  return <div className="grid gap-4" id={closingReport ? "cash-closing-report" : undefined}>
+    {closingReport && <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-semibold">Relatório de fechamento {closingReportCode(cashSession)}</h2><p className="text-sm text-slate-500">Movimentações registradas durante a operação deste caixa.</p></div><div className="flex gap-2 print:hidden">{onDismiss && <button className="btn btn-secondary" type="button" onClick={onDismiss}>Voltar</button>}<button className="btn btn-primary" type="button" onClick={() => window.print()}>Imprimir</button></div></div>}
     {!closingReport && <div className="panel grid gap-3 p-3 md:grid-cols-3"><select className="field" value={period} onChange={(event) => setPeriod(event.target.value)}><option value="today">Caixa atual — desde a abertura</option><option value="yesterday">Ontem</option><option value="week">Semana</option><option value="month">Mês</option><option value="custom">Personalizado</option></select>{period === "custom" && <><input className="field" type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /><input className="field" type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></>}</div>}
     {(loading || refreshing) && <div className="panel p-5 text-sm text-slate-600">Atualizando o relatório do período selecionado...</div>}
+    {!loading && !refreshing && !closingReport && (reportData?.sessions ?? []).length > 0 && <div className="panel flex flex-wrap gap-x-6 gap-y-2 p-4 text-sm">{(reportData?.sessions ?? []).map((item) => <p key={item.id}><b>Relatório:</b> {closingReportCode(item)} · <b>Caixa:</b> {cashSessionCode(item)}</p>)}</div>}
     {!loading && !refreshing && <>{(reportData?.sessions ?? []).map((reportSession) => <div className="panel grid gap-2 p-4 text-sm md:grid-cols-4" key={reportSession.id}><p><b>Caixa:</b> {cashSessionCode(reportSession)}</p><p><b>Abertura:</b> {dateTimeBR(reportSession.openedAt)}</p><p><b>Fechamento:</b> {reportSession.closedAt ? dateTimeBR(reportSession.closedAt) : "Em operação"}</p><p><b>Operador:</b> {reportSession.openedByName ?? "-"}</p><p><b>Valor inicial:</b> {currency(reportSession.openingAmount)}</p>{reportSession.closedAt && <><p><b>Dinheiro esperado:</b> {currency(reportSession.expectedCashAmount ?? 0)}</p><p><b>Dinheiro contado:</b> {currency(reportSession.closingCashAmount ?? 0)}</p><p><b>Diferença:</b> {currency(reportSession.difference ?? 0)}</p></>}</div>)}<div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">{summaryCards.map((card) => <div className="panel min-w-0 p-4" key={card.label}><p className="text-sm font-medium text-slate-500">{card.label}</p><b className="mt-1 block whitespace-nowrap text-lg">{currency(card.value)}</b></div>)}</div>
     {paymentGroups.length > 0 && <div className="grid gap-4 lg:grid-cols-2">{paymentGroups.map((group) => <PaymentReportGroup key={group.key} title={group.title} method={group.method} payments={group.payments} />)}</div>}</>}
     {!loading && !refreshing && (reportData?.sessions ?? []).some((item) => item.movements?.length) && <section className="panel overflow-hidden"><div className="border-b border-slate-200 bg-slate-50 p-3"><h3 className="font-semibold">Movimentações do caixa</h3></div><div className="divide-y divide-slate-100">{(reportData?.sessions ?? []).flatMap((item) => item.movements ?? []).map((movement) => <div className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm" key={movement.id}><p><b>{dateTimeBR(movement.createdAt)}</b> | {cashMovementLabels[movement.type]} | {movement.reason}{movement.operatorName ? ` | ${movement.operatorName}` : ""}</p><b>{currency(movement.amount)}</b></div>)}</div></section>}
