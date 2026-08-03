@@ -413,6 +413,11 @@ function dateTimeBR(value?: string | null) {
   return new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
 
+function timeBR(value?: string | null) {
+  if (!value) return "-";
+  return new Date(value).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+}
+
 function pendingObservation(value?: string | null) {
   return value?.replace(/\n?Previsão de pagamento:\s*\d{2}\/\d{2}\/\d{4}\s*$/i, "").trim() ?? "";
 }
@@ -3199,6 +3204,16 @@ function CashReports({ isAdmin }: { isAdmin: boolean }) {
   const range = cashPeriodRange(period, customFrom, customTo);
   const { data } = useData<CashReport>(isAdmin ? `/cash/reports/summary?from=${range.from}&to=${range.to}` : "", [isAdmin, period, customFrom, customTo]);
   const paymentDetails = data?.paymentDetails ?? [];
+  const paymentGroups = [...paymentDetails.reduce((groups, payment) => {
+    const isCard = payment.method === "DEBIT" || payment.method === "CREDIT";
+    const brand = payment.cardBrand?.trim() || "Sem bandeira";
+    const key = isCard ? `${payment.method}:${brand.toLocaleLowerCase("pt-BR")}` : payment.method;
+    const title = isCard ? `${brand} ${payment.method === "CREDIT" ? "Crédito" : "Débito"}` : paymentMethodLabels[payment.method];
+    const current = groups.get(key) ?? { key, title, method: payment.method, payments: [] as CashPaymentDetail[] };
+    current.payments.push(payment);
+    groups.set(key, current);
+    return groups;
+  }, new Map<string, { key: string; title: string; method: PaymentMethod; payments: CashPaymentDetail[] }>()).values()];
   const summaryCards = [
     { label: "PIX", value: data?.totalsByMethod?.PIX ?? 0 },
     { label: "Dinheiro", value: data?.totalsByMethod?.CASH ?? 0 },
@@ -3213,25 +3228,20 @@ function CashReports({ isAdmin }: { isAdmin: boolean }) {
   return <div className="grid gap-4">
     <div className="panel grid gap-3 p-3 md:grid-cols-3"><select className="field" value={period} onChange={(event) => setPeriod(event.target.value)}><option value="today">Hoje</option><option value="yesterday">Ontem</option><option value="week">Semana</option><option value="month">Mês</option><option value="custom">Personalizado</option></select>{period === "custom" && <><input className="field" type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /><input className="field" type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></>}</div>
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">{summaryCards.map((card) => <div className="panel min-w-0 p-4" key={card.label}><p className="text-sm font-medium text-slate-500">{card.label}</p><b className="mt-1 block whitespace-nowrap text-lg">{currency(card.value)}</b></div>)}</div>
-    <div className="grid gap-4 lg:grid-cols-2">{(["DEBIT", "CREDIT", "PIX", "CASH"] as PaymentMethod[]).map((method) => <PaymentReportGroup key={method} method={method} payments={paymentDetails.filter((payment) => payment.method === method)} />)}</div>
+    {paymentGroups.length > 0 && <div className="grid gap-4 lg:grid-cols-2">{paymentGroups.map((group) => <PaymentReportGroup key={group.key} title={group.title} method={group.method} payments={group.payments} />)}</div>}
     <div className="grid gap-4 lg:grid-cols-2"><ReportList title="Vendas por operador" items={data?.byOperator ?? []} /><ReportList title="Vendas por serviço" items={data?.byService ?? []} /><ReportList title="Vendas por produto" items={data?.byProduct ?? []} /><ReportList title="Horários das vendas" items={(data?.byHour ?? []).map((item) => ({ name: `${item.hour}h`, total: item.total }))} /></div>
   </div>;
 }
 
-function PaymentReportGroup({ method, payments }: { method: PaymentMethod; payments: CashPaymentDetail[] }) {
+function PaymentReportGroup({ title, method, payments }: { title: string; method: PaymentMethod; payments: CashPaymentDetail[] }) {
   const total = payments.reduce((sum, payment) => sum + payment.amount, 0);
   return <section className="panel overflow-hidden">
-    <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 p-3"><div><h3 className="font-semibold">{paymentMethodLabels[method]}</h3><p className="text-xs text-slate-500">{payments.length} transação(ões)</p></div><b>{currency(total)}</b></div>
+    <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 p-3"><div><h3 className="font-semibold">{title}</h3><p className="text-xs text-slate-500">{payments.length} transação(ões)</p></div><b>{currency(total)}</b></div>
     <div className="divide-y divide-slate-100">
-      {payments.map((payment) => <div className="grid gap-1 p-3 text-sm" key={payment.id}>
-        <div className="flex flex-wrap justify-between gap-2"><b>{dateTimeBR(payment.paidAt)} · PD-{String(payment.saleCode ?? 0).padStart(5, "0")}</b><b>{currency(payment.amount)}</b></div>
-        <p>Comprovante: {payment.receiptCode ? `CV-${String(payment.receiptCode).padStart(6, "0")}` : "-"}</p>
-        <p>{payment.customerName}{payment.petName ? ` · ${payment.petName}` : ""} · Operador: {payment.operatorName}</p>
-        {(method === "DEBIT" || method === "CREDIT") && <p>{payment.cardBrand ?? "Sem bandeira"}{method === "CREDIT" ? ` · ${payment.installments ?? 0}x` : ""} · NSU {payment.cardNsu ?? "-"}</p>}
-        {method === "PIX" && <p>Comprovante: {payment.pixReference ?? payment.cardNsu ?? "-"}</p>}
-        {method === "CASH" && <p>Venda: {currency(payment.amount)} · Recebido: {currency(payment.cashReceived ?? payment.amount)} · Troco: {currency(payment.changeAmount ?? 0)}</p>}
+      {payments.map((payment) => <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 p-3 text-sm" key={payment.id}>
+        <p><b>{timeBR(payment.paidAt)}</b> | <b>{payment.receiptCode ? `CV-${String(payment.receiptCode).padStart(6, "0")}` : `PD-${String(payment.saleCode ?? 0).padStart(5, "0")}`}</b> | {payment.customerName}{payment.petName ? ` | ${payment.petName}` : ""}{(method === "DEBIT" || method === "CREDIT") ? ` | NSU: ${payment.cardNsu ?? "-"}${method === "CREDIT" ? ` | Parcelado: ${payment.installments ?? 1}x` : ""}` : ""}{method === "PIX" ? ` | Comprovante: ${payment.pixReference ?? payment.cardNsu ?? "-"}` : ""}{method === "CASH" ? ` | Recebido: ${currency(payment.cashReceived ?? payment.amount)} | Troco: ${currency(payment.changeAmount ?? 0)}` : ""}</p>
+        <b className="whitespace-nowrap">{currency(payment.amount)}</b>
       </div>)}
-      {!payments.length && <p className="p-3 text-sm text-slate-500">Nenhum recebimento no período.</p>}
     </div>
   </section>;
 }
