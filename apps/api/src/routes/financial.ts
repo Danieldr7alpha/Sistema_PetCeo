@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { companyId, requireAdmin } from "../middleware/auth.js";
 import { prisma } from "../lib/prisma.js";
 
@@ -65,6 +66,41 @@ const feeRuleSchema = z.object({
   active: z.boolean().default(true)
 });
 
+const payableCategories = ["RENT", "WATER", "ELECTRICITY", "INTERNET_PHONE", "PAYROLL", "TAXES", "PRODUCT_PURCHASE", "GROOMING_SUPPLIES", "CLEANING_SUPPLIES", "MAINTENANCE", "MARKETING", "SOFTWARE", "BANK_FEES", "FREIGHT", "PROFESSIONAL_SERVICES", "OTHER"] as const;
+const payableSchema = z.object({
+  description: z.string().trim().min(2),
+  category: z.enum(payableCategories),
+  expenseType: z.enum(["FIXED", "VARIABLE"]),
+  supplierName: z.string().trim().optional(),
+  documentNumber: z.string().trim().optional(),
+  amount: z.coerce.number().positive(),
+  dueDate: z.string().date(),
+  competenceMonth: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+  recurring: z.boolean().default(false),
+  repeatMonths: z.coerce.number().int().min(1).max(60).default(1),
+  notes: z.string().trim().optional()
+});
+
+function payableDate(value: string) {
+  return new Date(`${value}T12:00:00-03:00`);
+}
+
+function addPayableMonths(date: Date, months: number) {
+  const next = new Date(date);
+  const desiredDay = next.getUTCDate();
+  next.setUTCDate(1);
+  next.setUTCMonth(next.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0)).getUTCDate();
+  next.setUTCDate(Math.min(desiredDay, lastDay));
+  return next;
+}
+
+function addCompetenceMonths(value: string, months: number) {
+  const [year, month] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1 + months, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 financialRouter.get("/payment-methods/active", async (req, res) => {
   await ensureCashPaymentMethod(companyId(req));
   const methods = await prisma.financialPaymentMethod.findMany({
@@ -100,7 +136,60 @@ financialRouter.get("/overview", async (req, res) => {
     prisma.salePayment.aggregate({ where: { companyId: cid }, _sum: { feeAmount: true } })
   ]);
   const receivable = Number(futureInstallments._sum.netAmount ?? 0) + Number(legacyFuturePayments._sum.netAmount ?? 0) + Number(pendingSales._sum.pendingAmount ?? 0);
-  res.json({ payable: 0, receivable, fees: Number(fees._sum.feeAmount ?? 0) });
+  const payable = await prisma.financialPayable.aggregate({ where: { companyId: cid, status: "OPEN" }, _sum: { amount: true } });
+  res.json({ payable: Number(payable._sum.amount ?? 0), receivable, fees: Number(fees._sum.feeAmount ?? 0) });
+});
+
+financialRouter.get("/payables", async (req, res) => {
+  const cid = companyId(req);
+  const status = String(req.query.status ?? "OPEN");
+  const where: any = { companyId: cid };
+  if (["OPEN", "PAID", "CANCELLED"].includes(status)) where.status = status;
+  const items = await prisma.financialPayable.findMany({ where, include: { paidFromAccount: { select: { id: true, name: true } } }, orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }] });
+  res.json(items);
+});
+
+financialRouter.post("/payables", async (req, res) => {
+  const cid = companyId(req);
+  const body = payableSchema.parse(req.body);
+  const total = body.recurring ? body.repeatMonths : 1;
+  const groupId = total > 1 ? randomUUID() : null;
+  const firstDueDate = payableDate(body.dueDate);
+  const created = await prisma.$transaction(Array.from({ length: total }, (_, index) => prisma.financialPayable.create({ data: {
+    companyId: cid, description: body.description, category: body.category, expenseType: body.expenseType,
+    supplierName: body.supplierName || null, documentNumber: body.documentNumber || null, amount: body.amount,
+    dueDate: addPayableMonths(firstDueDate, index), competenceMonth: body.competenceMonth ? addCompetenceMonths(body.competenceMonth, index) : null,
+    installmentNumber: index + 1, installmentTotal: total, recurrenceGroupId: groupId,
+    notes: body.notes || null, createdById: req.user?.userId, updatedById: req.user?.userId
+  } })));
+  res.status(201).json(created);
+});
+
+financialRouter.patch("/payables/:id", async (req, res) => {
+  const cid = companyId(req);
+  const body = payableSchema.partial().omit({ recurring: true, repeatMonths: true }).parse(req.body);
+  const existing = await prisma.financialPayable.findFirst({ where: { id: req.params.id, companyId: cid } });
+  if (!existing) return res.status(404).json({ message: "Conta a pagar não encontrada." });
+  if (existing.status !== "OPEN") return res.status(400).json({ message: "Somente contas em aberto podem ser editadas." });
+  res.json(await prisma.financialPayable.update({ where: { id: existing.id }, data: { ...body, dueDate: body.dueDate ? payableDate(body.dueDate) : undefined, updatedById: req.user?.userId } }));
+});
+
+financialRouter.post("/payables/:id/pay", async (req, res) => {
+  const cid = companyId(req);
+  const body = z.object({ paidAmount: z.coerce.number().positive(), paidAt: z.string().date(), paidFromAccountId: z.string().min(1), paymentMethod: z.string().trim().min(1) }).parse(req.body);
+  const existing = await prisma.financialPayable.findFirst({ where: { id: req.params.id, companyId: cid, status: "OPEN" } });
+  if (!existing) return res.status(404).json({ message: "Conta em aberto não encontrada." });
+  const account = await prisma.financialAccount.findFirst({ where: { id: body.paidFromAccountId, companyId: cid, active: true } });
+  if (!account) return res.status(400).json({ message: "Selecione uma conta ativa para registrar o pagamento." });
+  res.json(await prisma.financialPayable.update({ where: { id: existing.id }, data: { status: "PAID", paidAmount: body.paidAmount, paidAt: payableDate(body.paidAt), paidFromAccountId: account.id, paymentMethod: body.paymentMethod, updatedById: req.user?.userId } }));
+});
+
+financialRouter.delete("/payables/:id", async (req, res) => {
+  const cid = companyId(req);
+  const existing = await prisma.financialPayable.findFirst({ where: { id: req.params.id, companyId: cid, status: "OPEN" } });
+  if (!existing) return res.status(404).json({ message: "Conta em aberto não encontrada." });
+  await prisma.financialPayable.update({ where: { id: existing.id }, data: { status: "CANCELLED", updatedById: req.user?.userId } });
+  res.json({ deleted: true });
 });
 
 financialRouter.get("/accounts", async (req, res) => {
@@ -120,9 +209,15 @@ financialRouter.get("/accounts", async (req, res) => {
     const accountId = installment.salePayment.destinationAccountId;
     if (accountId) receivedByAccount.set(accountId, (receivedByAccount.get(accountId) ?? 0) + Number(installment.netAmount));
   }
+  const paidPayables = await prisma.financialPayable.groupBy({
+    by: ["paidFromAccountId"],
+    where: { companyId: cid, status: "PAID", paidFromAccountId: { not: null } },
+    _sum: { paidAmount: true }
+  });
+  const paidByAccount = new Map(paidPayables.map((item) => [item.paidFromAccountId, Number(item._sum.paidAmount ?? 0)]));
   res.json(accounts.map((account) => ({
     ...account,
-    calculatedBalance: Number(account.openingBalance) + (receivedByAccount.get(account.id) ?? 0)
+    calculatedBalance: Number(account.openingBalance) + (receivedByAccount.get(account.id) ?? 0) - (paidByAccount.get(account.id) ?? 0)
   })));
 });
 

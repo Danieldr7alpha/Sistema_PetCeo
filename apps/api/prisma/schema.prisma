@@ -176,6 +176,36 @@ enum PaymentSettlementContract {
   SAME_DAY
 }
 
+enum PayableExpenseType {
+  FIXED
+  VARIABLE
+}
+
+enum PayableStatus {
+  OPEN
+  PAID
+  CANCELLED
+}
+
+enum PayableCategory {
+  RENT
+  WATER
+  ELECTRICITY
+  INTERNET_PHONE
+  PAYROLL
+  TAXES
+  PRODUCT_PURCHASE
+  GROOMING_SUPPLIES
+  CLEANING_SUPPLIES
+  MAINTENANCE
+  MARKETING
+  SOFTWARE
+  BANK_FEES
+  FREIGHT
+  PROFESSIONAL_SERVICES
+  OTHER
+}
+
 model Company {
   id                      String                   @id @default(cuid())
   name                    String
@@ -225,6 +255,7 @@ model Company {
   financialPaymentMethods FinancialPaymentMethod[]
   paymentMethodBrands     PaymentMethodBrand[]
   paymentFeeRules         PaymentFeeRule[]
+  financialPayables       FinancialPayable[]
 }
 
 model User {
@@ -774,9 +805,42 @@ model FinancialAccount {
   company            Company                  @relation(fields: [companyId], references: [id])
   paymentMethods     FinancialPaymentMethod[]
   salePayments       SalePayment[]
+  payablePayments    FinancialPayable[]
 
   @@unique([companyId, name])
   @@index([companyId, active])
+}
+
+model FinancialPayable {
+  id                String             @id @default(cuid())
+  companyId         String
+  description       String
+  category          PayableCategory
+  expenseType       PayableExpenseType
+  supplierName      String?
+  documentNumber    String?
+  amount            Decimal            @db.Decimal(12, 2)
+  dueDate           DateTime
+  competenceMonth   String?
+  installmentNumber Int                @default(1)
+  installmentTotal  Int                @default(1)
+  recurrenceGroupId String?
+  status            PayableStatus      @default(OPEN)
+  paidAmount        Decimal?           @db.Decimal(12, 2)
+  paidAt            DateTime?
+  paidFromAccountId String?
+  paymentMethod     String?
+  notes             String?
+  createdById       String?
+  updatedById       String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  company           Company            @relation(fields: [companyId], references: [id])
+  paidFromAccount   FinancialAccount?  @relation(fields: [paidFromAccountId], references: [id])
+
+  @@index([companyId, status, dueDate])
+  @@index([companyId, category])
+  @@index([recurrenceGroupId])
 }
 
 model FinancialPaymentMethod {
