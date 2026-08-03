@@ -8,7 +8,10 @@ if (!process.env.DATABASE_URL) {
 }
 
 const adapter = new PrismaPg({
-  connectionString: process.env.DATABASE_URL
+  connectionString: process.env.DATABASE_URL,
+  max: 1,
+  idleTimeoutMillis: 5_000,
+  connectionTimeoutMillis: 10_000
 });
 
 export const prisma = new PrismaClient({ adapter });

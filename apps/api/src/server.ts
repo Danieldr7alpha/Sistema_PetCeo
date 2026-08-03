@@ -72,11 +72,19 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
       message: "O banco de dados precisa ser atualizado antes de usar esta função."
     });
   }
+  const technicalMessage = error instanceof Error ? error.message : String(error);
+  if (technicalMessage.includes("EMAXCONNSESSION") || technicalMessage.includes("max clients reached")) {
+    console.error("DATABASE_CONNECTION_LIMIT", { message: technicalMessage });
+    return res.status(503).json({
+      code: "DATABASE_BUSY",
+      message: "O banco está temporariamente ocupado. Aguarde alguns segundos e tente novamente."
+    });
+  }
   console.error(error);
   return res.status(500).json({ message: "Erro interno" });
 });
 
-if (!process.env.NETLIFY) {
+if (!process.env.NETLIFY && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
   const port = Number(process.env.PORT ?? 3333);
   app.listen(port, () => {
     console.log(`CEO Pet AI API running on http://localhost:${port}`);
