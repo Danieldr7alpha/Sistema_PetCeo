@@ -827,9 +827,13 @@ model FinancialPayable {
   recurrenceGroupId String?
   status            PayableStatus      @default(OPEN)
   paidAmount        Decimal?           @db.Decimal(12, 2)
+  interestAmount    Decimal?           @db.Decimal(12, 2)
   paidAt            DateTime?
   paidFromAccountId String?
   paymentMethod     String?
+  receiptFileName   String?
+  receiptMimeType   String?
+  receiptData       String?            @db.Text
   notes             String?
   createdById       String?
   updatedById       String?

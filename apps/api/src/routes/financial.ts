@@ -176,12 +176,23 @@ financialRouter.patch("/payables/:id", async (req, res) => {
 
 financialRouter.post("/payables/:id/pay", async (req, res) => {
   const cid = companyId(req);
-  const body = z.object({ paidAmount: z.coerce.number().positive(), paidAt: z.string().date(), paidFromAccountId: z.string().min(1), paymentMethod: z.string().trim().min(1) }).parse(req.body);
+  const body = z.object({
+    paidAmount: z.coerce.number().positive(), paidAt: z.string().date(), paidFromAccountId: z.string().min(1), paymentMethod: z.string().trim().min(1),
+    hasInterest: z.boolean().default(false), receiptFileName: z.string().trim().max(180).optional(), receiptMimeType: z.string().trim().max(100).optional(),
+    receiptData: z.string().max(2_800_000).optional()
+  }).parse(req.body);
   const existing = await prisma.financialPayable.findFirst({ where: { id: req.params.id, companyId: cid, status: "OPEN" } });
   if (!existing) return res.status(404).json({ message: "Conta em aberto não encontrada." });
   const account = await prisma.financialAccount.findFirst({ where: { id: body.paidFromAccountId, companyId: cid, active: true } });
   if (!account) return res.status(400).json({ message: "Selecione uma conta ativa para registrar o pagamento." });
-  res.json(await prisma.financialPayable.update({ where: { id: existing.id }, data: { status: "PAID", paidAmount: body.paidAmount, paidAt: payableDate(body.paidAt), paidFromAccountId: account.id, paymentMethod: body.paymentMethod, updatedById: req.user?.userId } }));
+  if (!body.hasInterest && body.paidAmount !== Number(existing.amount)) return res.status(400).json({ message: "Sem juros, o valor pago deve ser igual ao valor original da parcela." });
+  if (body.hasInterest && body.paidAmount < Number(existing.amount)) return res.status(400).json({ message: "O valor total com juros não pode ser menor que o valor original." });
+  if (body.receiptData && !body.receiptData.startsWith("data:")) return res.status(400).json({ message: "Comprovante inválido." });
+  res.json(await prisma.financialPayable.update({ where: { id: existing.id }, data: {
+    status: "PAID", paidAmount: body.paidAmount, interestAmount: Math.max(0, body.paidAmount - Number(existing.amount)), paidAt: payableDate(body.paidAt),
+    paidFromAccountId: account.id, paymentMethod: body.paymentMethod, receiptFileName: body.receiptFileName || null,
+    receiptMimeType: body.receiptMimeType || null, receiptData: body.receiptData || null, updatedById: req.user?.userId
+  } }));
 });
 
 financialRouter.delete("/payables/:id", async (req, res) => {
