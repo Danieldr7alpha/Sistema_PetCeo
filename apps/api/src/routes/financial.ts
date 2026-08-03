@@ -81,6 +81,28 @@ financialRouter.get("/payment-methods/active", async (req, res) => {
 
 financialRouter.use(requireAdmin);
 
+financialRouter.get("/overview", async (req, res) => {
+  const cid = companyId(req);
+  const now = new Date();
+  const [futureInstallments, legacyFuturePayments, pendingSales, fees] = await Promise.all([
+    prisma.salePaymentInstallment.aggregate({
+      where: { expectedSettlementDate: { gt: now }, salePayment: { companyId: cid } },
+      _sum: { netAmount: true }
+    }),
+    prisma.salePayment.aggregate({
+      where: { companyId: cid, expectedSettlementDate: { gt: now }, settlementInstallments: { none: {} } },
+      _sum: { netAmount: true }
+    }),
+    prisma.sale.aggregate({
+      where: { companyId: cid, status: { in: ["PENDING", "PARTIALLY_PAID"] } },
+      _sum: { pendingAmount: true }
+    }),
+    prisma.salePayment.aggregate({ where: { companyId: cid }, _sum: { feeAmount: true } })
+  ]);
+  const receivable = Number(futureInstallments._sum.netAmount ?? 0) + Number(legacyFuturePayments._sum.netAmount ?? 0) + Number(pendingSales._sum.pendingAmount ?? 0);
+  res.json({ payable: 0, receivable, fees: Number(fees._sum.feeAmount ?? 0) });
+});
+
 financialRouter.get("/accounts", async (req, res) => {
   const cid = companyId(req);
   const accounts = await prisma.financialAccount.findMany({ where: { companyId: cid, active: true }, orderBy: { name: "asc" } });

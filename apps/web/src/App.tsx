@@ -3658,6 +3658,7 @@ const financialPaymentTypeLabels: Record<FinancialPaymentMethod["type"], string>
 function FinancialModule({ sectionPage }: { sectionPage: string }) {
   const { data: accounts, refresh: refreshAccounts } = useData<FinancialAccount[]>("/financial/accounts");
   const { data: methods, refresh: refreshMethods } = useData<FinancialPaymentMethod[]>("/financial/payment-methods");
+  const { data: overview } = useData<{ payable: number; receivable: number; fees: number }>("/financial/overview");
   const [accountOpen, setAccountOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<FinancialAccount | null>(null);
   const [methodOpen, setMethodOpen] = useState(false);
@@ -3674,7 +3675,14 @@ function FinancialModule({ sectionPage }: { sectionPage: string }) {
     {methodOpen && <FinancialMethodModal method={editingMethod} accounts={(accounts ?? []).filter((account) => account.active)} onClose={() => { setMethodOpen(false); setEditingMethod(null); }} onSaved={() => { setMethodOpen(false); setEditingMethod(null); refreshMethods(); }} />}
   </Page>;
   if (sectionPage !== "financial") return <Page title="Financeiro"><div className="panel p-6"><h2 className="font-semibold">Disponível nas próximas fases</h2><p className="mt-2 text-sm text-slate-600">Esta área será ativada incrementalmente após a validação das contas, formas de recebimento, taxas e snapshots da Fase 1.</p></div></Page>;
-  return <Page title="Financeiro — Visão geral"><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><div className="panel p-4"><p className="text-sm text-slate-500">Contas financeiras</p><b className="text-2xl">{accounts?.length ?? 0}</b></div><div className="panel p-4"><p className="text-sm text-slate-500">Formas ativas</p><b className="text-2xl">{methods?.filter((method) => method.active).length ?? 0}</b></div><div className="panel p-4"><p className="text-sm text-slate-500">Regras de taxa</p><b className="text-2xl">{methods?.reduce((sum, method) => sum + method.feeRules.length, 0) ?? 0}</b></div></div></Page>;
+  const bankAccounts = (accounts ?? []).filter((account) => account.type !== "CASH_DRAWER");
+  return <Page title="Financeiro — Visão geral"><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    {bankAccounts.map((account) => <div className="rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-blue-100 p-5 shadow-sm" key={account.id}><p className="text-sm font-semibold text-blue-700">{account.institutionName || account.name}</p><p className="mt-1 text-xs text-blue-600">{account.name}</p><b className="mt-3 block text-2xl text-blue-950">{currency(account.calculatedBalance ?? account.openingBalance)}</b><p className="mt-1 text-xs text-blue-600">Valor disponível na conta</p></div>)}
+    {!bankAccounts.length && <div className="rounded-xl border border-blue-200 bg-blue-50 p-5"><p className="font-semibold text-blue-800">Nenhum banco cadastrado</p><p className="mt-1 text-sm text-blue-600">Cadastre uma conta no submenu Bancos.</p></div>}
+    <div className="rounded-xl border border-red-200 bg-gradient-to-br from-red-50 to-rose-100 p-5 shadow-sm"><p className="text-sm font-semibold text-red-700">Contas a pagar</p><b className="mt-3 block text-2xl text-red-950">{currency(overview?.payable ?? 0)}</b><p className="mt-1 text-xs text-red-600">Total pendente</p></div>
+    <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-green-100 p-5 shadow-sm"><p className="text-sm font-semibold text-emerald-700">A receber</p><b className="mt-3 block text-2xl text-emerald-950">{currency(overview?.receivable ?? 0)}</b><p className="mt-1 text-xs text-emerald-600">Vendas pendentes e recebimentos futuros</p></div>
+    <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-yellow-100 p-5 shadow-sm"><p className="text-sm font-semibold text-amber-700">Taxas</p><b className="mt-3 block text-2xl text-amber-950">{currency(overview?.fees ?? 0)}</b><p className="mt-1 text-xs text-amber-600">Total descontado pelas operadoras</p></div>
+  </div></Page>;
 }
 
 function FinancialAccountModal({ account, onClose, onSaved }: { account: FinancialAccount | null; onClose: () => void; onSaved: () => void }) {
