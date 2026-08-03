@@ -3232,7 +3232,6 @@ function CashReports({ isAdmin, cashSession }: { isAdmin: boolean; cashSession: 
     <div className="panel grid gap-3 p-3 md:grid-cols-3"><select className="field" value={period} onChange={(event) => setPeriod(event.target.value)}>{cashSession && <option value="current">Caixa atual — desde a abertura</option>}<option value="today">Hoje</option><option value="yesterday">Ontem</option><option value="week">Semana</option><option value="month">Mês</option><option value="custom">Personalizado</option></select>{period === "custom" && <><input className="field" type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /><input className="field" type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></>}</div>
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">{summaryCards.map((card) => <div className="panel min-w-0 p-4" key={card.label}><p className="text-sm font-medium text-slate-500">{card.label}</p><b className="mt-1 block whitespace-nowrap text-lg">{currency(card.value)}</b></div>)}</div>
     {paymentGroups.length > 0 && <div className="grid gap-4 lg:grid-cols-2">{paymentGroups.map((group) => <PaymentReportGroup key={group.key} title={group.title} method={group.method} payments={group.payments} />)}</div>}
-    <div className="grid gap-4 lg:grid-cols-2"><ReportList title="Vendas por operador" items={data?.byOperator ?? []} /><ReportList title="Vendas por serviço" items={data?.byService ?? []} /><ReportList title="Vendas por produto" items={data?.byProduct ?? []} /><ReportList title="Horários das vendas" items={(data?.byHour ?? []).map((item) => ({ name: `${item.hour}h`, total: item.total }))} /></div>
   </div>;
 }
 
@@ -3247,10 +3246,6 @@ function PaymentReportGroup({ title, method, payments }: { title: string; method
       </div>)}
     </div>
   </section>;
-}
-
-function ReportList({ title, items }: { title: string; items: { name: string; total: number }[] }) {
-  return <div className="panel p-4"><h3 className="mb-3 font-semibold">{title}</h3><div className="grid gap-2 text-sm">{items.slice(0, 8).map((item) => <div className="flex justify-between gap-3" key={item.name}><span>{item.name}</span><b>{currency(item.total)}</b></div>)}{!items.length && <p className="text-slate-500">Sem dados no período.</p>}</div></div>;
 }
 
 function SaleReceiveModal({ sale, session, cashSession, onClose, onSaved }: { sale?: Sale; session: Session; cashSession: CashSession | null; onClose: () => void; onSaved: () => void }) {
