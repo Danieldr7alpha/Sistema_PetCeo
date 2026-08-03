@@ -93,7 +93,8 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
         payload: sanitize(requestBody)
       });
     }
-    if (response.status === 401) {
+    const isPublicAuthRequest = path === "/auth/login" || path === "/auth/register" || path === "/auth/forgot-password" || path === "/auth/reset-password";
+    if (response.status === 401 && !isPublicAuthRequest) {
       localStorage.removeItem("ceo-pet-session");
       window.dispatchEvent(new Event("ceo-pet-auth-expired"));
       throw new Error("Sua sessão expirou. Entre novamente.");
