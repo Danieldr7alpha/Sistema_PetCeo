@@ -146,7 +146,7 @@ financialRouter.patch("/accounts/:id", async (req, res) => {
 financialRouter.get("/payment-methods", async (req, res) => {
   await ensureCashPaymentMethod(companyId(req));
   const methods = await prisma.financialPaymentMethod.findMany({
-    where: { companyId: companyId(req) },
+    where: { companyId: companyId(req), active: true },
     include: { destinationAccount: true, brands: { orderBy: { brandName: "asc" } }, feeRules: { orderBy: { effectiveFrom: "desc" } } },
     orderBy: [{ active: "desc" }, { name: "asc" }]
   });
@@ -180,7 +180,7 @@ financialRouter.post("/payment-methods", async (req, res) => {
 
 financialRouter.patch("/payment-methods/:id", async (req, res) => {
   const cid = companyId(req);
-  const body = paymentMethodSchema.partial().omit({ brands: true }).parse(req.body);
+  const body = paymentMethodSchema.partial().parse(req.body);
   const existing = await prisma.financialPaymentMethod.findFirst({ where: { id: req.params.id, companyId: cid } });
   if (!existing) return res.status(404).json({ message: "Forma de recebimento não encontrada." });
   if (existing.type === "CASH" && (body.active === false || (body.type && body.type !== "CASH"))) return res.status(400).json({ message: "Dinheiro é uma forma padrão do sistema e não pode ser desativada ou alterada." });
@@ -188,7 +188,31 @@ financialRouter.patch("/payment-methods/:id", async (req, res) => {
     const account = await prisma.financialAccount.findFirst({ where: { id: body.destinationAccountId, companyId: cid, active: true } });
     if (!account) return res.status(400).json({ message: "Conta financeira de destino inválida." });
   }
-  res.json(await prisma.financialPaymentMethod.update({ where: { id: existing.id }, data: body, include: { destinationAccount: true, brands: true, feeRules: true } }));
+  const { brands, ...methodData } = body;
+  const updated = await prisma.$transaction(async (tx) => {
+    if (brands) {
+      const normalized = [...new Set(brands.map((brand) => brand.trim()).filter(Boolean))];
+      await tx.paymentMethodBrand.updateMany({ where: { paymentMethodId: existing.id }, data: { active: false } });
+      for (const brandName of normalized) {
+        await tx.paymentMethodBrand.upsert({
+          where: { paymentMethodId_brandName: { paymentMethodId: existing.id, brandName } },
+          update: { active: true },
+          create: { companyId: cid, paymentMethodId: existing.id, brandName, active: true }
+        });
+      }
+    }
+    return tx.financialPaymentMethod.update({ where: { id: existing.id }, data: methodData, include: { destinationAccount: true, brands: true, feeRules: true } });
+  });
+  res.json(updated);
+});
+
+financialRouter.delete("/payment-methods/:id", async (req, res) => {
+  const cid = companyId(req);
+  const existing = await prisma.financialPaymentMethod.findFirst({ where: { id: req.params.id, companyId: cid } });
+  if (!existing) return res.status(404).json({ message: "Forma de recebimento não encontrada." });
+  if (existing.type === "CASH") return res.status(400).json({ message: "Dinheiro é padrão do sistema e não pode ser excluído." });
+  await prisma.financialPaymentMethod.update({ where: { id: existing.id }, data: { active: false } });
+  return res.json({ deleted: true, historyPreserved: true });
 });
 
 financialRouter.post("/payment-methods/:id/fee-rules", async (req, res) => {
