@@ -1902,7 +1902,7 @@ function Checkout({ draft, chargeSaleId, onClearDraft, session, sectionPage }: {
     {section === "preSales" && <CashPreSales onReceive={(sale) => setSaleModal({ sale })} />}
     {section === "pending" && <CashPendingSales onOpenInPos={openSaleInPos} />}
     {section === "movements" && cashStateReady && <CashMovements cashSession={cashSession} onRefresh={refreshCash} />}
-    {section === "reports" && <CashReports isAdmin={session.user.role === "ADMIN"} />}
+    {section === "reports" && <CashReports isAdmin={session.user.role === "ADMIN"} cashSession={cashSession} />}
 
     {saleModal && <SaleReceiveModal sale={saleModal.sale} session={session} cashSession={cashSession} onClose={() => setSaleModal(null)} onSaved={() => { setSaleModal(null); refreshPos(); }} />}
   </Page>;
@@ -3197,13 +3197,15 @@ function CashSalesHistory() {
   </div>;
 }
 
-function CashReports({ isAdmin }: { isAdmin: boolean }) {
+function CashReports({ isAdmin, cashSession }: { isAdmin: boolean; cashSession: CashSession | null }) {
   const [period, setPeriod] = useState("today");
   const [customFrom, setCustomFrom] = useState(localDateInput());
   const [customTo, setCustomTo] = useState(localDateInput());
   const range = cashPeriodRange(period, customFrom, customTo);
-  const reportParams = `from=${range.from}&to=${range.to}`;
-  const { data, loading, refreshing } = useData<CashReport>(isAdmin ? `/cash/reports/summary?${reportParams}` : "", [isAdmin, period, customFrom, customTo]);
+  const reportParams = period === "today" && cashSession?.id
+    ? `cashSessionId=${encodeURIComponent(cashSession.id)}`
+    : `from=${range.from}&to=${range.to}`;
+  const { data, loading, refreshing } = useData<CashReport>(isAdmin ? `/cash/reports/summary?${reportParams}` : "", [isAdmin, period, customFrom, customTo, cashSession?.id]);
   const reportData = loading || refreshing ? null : data;
   const paymentDetails = reportData?.paymentDetails ?? [];
   const paymentGroups = [...paymentDetails.reduce((groups, payment) => {
@@ -3228,7 +3230,7 @@ function CashReports({ isAdmin }: { isAdmin: boolean }) {
   ];
   if (!isAdmin) return <div className="panel p-4 text-sm text-slate-600">Relatórios são visíveis apenas para administradores.</div>;
   return <div className="grid gap-4">
-    <div className="panel grid gap-3 p-3 md:grid-cols-3"><select className="field" value={period} onChange={(event) => setPeriod(event.target.value)}><option value="today">Hoje</option><option value="yesterday">Ontem</option><option value="week">Semana</option><option value="month">Mês</option><option value="custom">Personalizado</option></select>{period === "custom" && <><input className="field" type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /><input className="field" type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></>}</div>
+    <div className="panel grid gap-3 p-3 md:grid-cols-3"><select className="field" value={period} onChange={(event) => setPeriod(event.target.value)}><option value="today">Caixa atual — desde a abertura</option><option value="yesterday">Ontem</option><option value="week">Semana</option><option value="month">Mês</option><option value="custom">Personalizado</option></select>{period === "custom" && <><input className="field" type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /><input className="field" type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></>}</div>
     {(loading || refreshing) && <div className="panel p-5 text-sm text-slate-600">Atualizando o relatório do período selecionado...</div>}
     {!loading && !refreshing && <><div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">{summaryCards.map((card) => <div className="panel min-w-0 p-4" key={card.label}><p className="text-sm font-medium text-slate-500">{card.label}</p><b className="mt-1 block whitespace-nowrap text-lg">{currency(card.value)}</b></div>)}</div>
     {paymentGroups.length > 0 && <div className="grid gap-4 lg:grid-cols-2">{paymentGroups.map((group) => <PaymentReportGroup key={group.key} title={group.title} method={group.method} payments={group.payments} />)}</div>}</>}
