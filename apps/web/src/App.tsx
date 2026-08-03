@@ -3675,7 +3675,7 @@ function FinancialModule({ sectionPage }: { sectionPage: string }) {
     <DataCards items={(methods ?? []).map((method) => ({ title: method.name, subtitle: `${financialPaymentTypeLabels[method.type]} · ${method.institutionName ?? "Sem instituição"} · Destino: ${method.destinationAccount.name}`, meta: `Taxa padrão: ${Number(method.defaultFeePercentage).toLocaleString("pt-BR")}% + ${currency(method.fixedFee)} | Contrato: ${method.settlementContract === "SAME_DAY" ? "mesmo dia" : `${method.settlementDays} dia(s) ${method.settlementDayType === "BUSINESS" ? "úteis" : "corridos"}`} | ${method.feeRules.length} regra(s)`, status: "Ativa", action: <div className="flex flex-wrap gap-2"><button className="btn btn-secondary" onClick={() => { setEditingMethod(method); setMethodOpen(true); }}>Editar</button>{method.type !== "CASH" && <button className="btn btn-secondary text-red-700" onClick={async () => { if (!window.confirm(`Excluir a forma de pagamento ${method.name}?`)) return; await api(`/financial/payment-methods/${method.id}`, { method: "DELETE" }); refreshMethods(); }}>Excluir</button>}</div> }))} />
     {methodOpen && <FinancialMethodModal method={editingMethod} accounts={(accounts ?? []).filter((account) => account.active)} onClose={() => { setMethodOpen(false); setEditingMethod(null); }} onSaved={() => { setMethodOpen(false); setEditingMethod(null); refreshMethods(); }} />}
   </Page>;
-  if (sectionPage === "financial:payables") return <FinancialPayables accounts={accounts ?? []} openTotal={overview?.payable ?? 0} onChanged={() => { refreshAccounts(); refreshOverview(); }} />;
+  if (sectionPage === "financial:payables") return <FinancialPayables accounts={accounts ?? []} onChanged={() => { refreshAccounts(); refreshOverview(); }} />;
   if (sectionPage !== "financial") return <Page title="Financeiro"><div className="panel p-6"><h2 className="font-semibold">Disponível nas próximas fases</h2><p className="mt-2 text-sm text-slate-600">Esta área será ativada incrementalmente após a validação das contas, formas de recebimento, taxas e snapshots da Fase 1.</p></div></Page>;
   const bankAccounts = (accounts ?? []).filter((account) => account.type !== "CASH_DRAWER");
   return <Page title="Financeiro — Visão geral"><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -3689,7 +3689,7 @@ function FinancialModule({ sectionPage }: { sectionPage: string }) {
 
 const payableCategoryLabels: Record<string, string> = { RENT: "Aluguel", WATER: "Água", ELECTRICITY: "Energia elétrica", INTERNET_PHONE: "Internet e telefone", PAYROLL: "Salários e encargos", TAXES: "Impostos e taxas públicas", PRODUCT_PURCHASE: "Compra de produtos para revenda", GROOMING_SUPPLIES: "Insumos de banho e tosa", CLEANING_SUPPLIES: "Material de limpeza", MAINTENANCE: "Manutenção e equipamentos", MARKETING: "Marketing e publicidade", SOFTWARE: "Sistemas e assinaturas", BANK_FEES: "Tarifas bancárias", FREIGHT: "Fretes e entregas", PROFESSIONAL_SERVICES: "Serviços profissionais", OTHER: "Outras despesas" };
 
-function FinancialPayables({ accounts, openTotal, onChanged }: { accounts: FinancialAccount[]; openTotal: number; onChanged: () => void }) {
+function FinancialPayables({ accounts, onChanged }: { accounts: FinancialAccount[]; onChanged: () => void }) {
   const [status, setStatus] = useState("OPEN");
   const [period, setPeriod] = useState("10_DAYS");
   const [customFrom, setCustomFrom] = useState(localDateInput());
@@ -3711,9 +3711,10 @@ function FinancialPayables({ accounts, openTotal, onChanged }: { accounts: Finan
   const [formOpen, setFormOpen] = useState(false);
   const [paying, setPaying] = useState<FinancialPayable | null>(null);
   const overdue = (payables ?? []).filter((item) => item.status === "OPEN" && new Date(item.dueDate) < new Date()).length;
+  const filteredOpenTotal = (payables ?? []).filter((item) => item.status === "OPEN").reduce((total, item) => total + Number(item.amount), 0);
   return <Page title="Contas a pagar" action={<button className="btn btn-primary" onClick={() => { setEditing(null); setFormOpen(true); }}><Plus size={16} />Nova conta</button>}>
     <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <div className="rounded-xl border border-red-200 bg-red-50 p-4"><p className="text-sm text-red-700">Total em aberto</p><b className="text-xl text-red-950">{currency(openTotal)}</b></div>
+      <div className="rounded-xl border border-red-200 bg-red-50 p-4"><p className="text-sm text-red-700">Total em aberto no período</p><b className="text-xl text-red-950">{currency(filteredOpenTotal)}</b></div>
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4"><p className="text-sm text-amber-700">Vencidas neste resultado</p><b className="text-xl text-amber-950">{overdue}</b></div>
       <div className="panel p-4"><label className="text-sm font-medium">Situação<select className="field mt-1" value={status} onChange={(e) => setStatus(e.target.value)}><option value="OPEN">Em aberto</option><option value="PAID">Pagas</option><option value="CANCELLED">Canceladas</option><option value="ALL">Todas</option></select></label></div>
       <div className="panel p-4"><label className="text-sm font-medium">Período<select className="field mt-1" value={period} onChange={(e) => setPeriod(e.target.value)}><option value="10_DAYS">Próximos 10 dias</option><option value="WEEK">Próxima semana</option><option value="MONTH">Próximo mês</option><option value="YEAR">Próximo ano</option><option value="CUSTOM">Personalizado</option></select></label></div>
