@@ -512,8 +512,13 @@ const emptyRegistration: RegistrationForm = {
 };
 
 function Login({ onSession }: { onSession: (session: Session) => void }) {
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const initialResetToken = new URLSearchParams(window.location.search).get("resetToken") ?? "";
+  const [mode, setMode] = useState<"login" | "register" | "forgot" | "reset">(initialResetToken ? "reset" : "login");
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
+  const [recoveryEmail, setRecoveryEmail] = useState("");
+  const [newPassword, setNewPassword] = useState({ password: "", confirm: "" });
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
   const [form, setForm] = useState<RegistrationForm>(emptyRegistration);
   const [error, setError] = useState("");
   const [lookingUpCep, setLookingUpCep] = useState(false);
@@ -570,6 +575,44 @@ function Login({ onSession }: { onSession: (session: Session) => void }) {
       setError(err instanceof Error ? err.message : "Falha no acesso");
     }
   }
+  async function requestPasswordReset(event: React.FormEvent) {
+    event.preventDefault(); setError(""); setMessage(""); setLoading(true);
+    try {
+      const result = await api<{ message: string }>("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email: recoveryEmail }) });
+      setMessage(result.message);
+    } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível enviar o e-mail."); }
+    finally { setLoading(false); }
+  }
+  async function resetPassword(event: React.FormEvent) {
+    event.preventDefault(); setError(""); setMessage("");
+    if (newPassword.password !== newPassword.confirm) { setError("As senhas não conferem."); return; }
+    setLoading(true);
+    try {
+      const result = await api<{ message: string }>("/auth/reset-password", { method: "POST", body: JSON.stringify({ token: initialResetToken, password: newPassword.password }) });
+      window.history.replaceState({}, "", window.location.pathname);
+      setLoginForm((current) => ({ ...current, password: "" })); setMode("login"); setMessage(result.message);
+    } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível alterar a senha."); }
+    finally { setLoading(false); }
+  }
+  if (mode === "forgot") return <main className="grid min-h-screen place-items-center bg-slate-100 p-4">
+    <form onSubmit={requestPasswordReset} className="panel w-full max-w-md p-6 shadow-sm">
+      <h1 className="text-2xl font-semibold">Esqueci minha senha</h1>
+      <p className="mt-1 text-sm text-slate-500">Informe seu e-mail de acesso. Enviaremos um link seguro para você criar uma nova senha.</p>
+      <label className="mt-5 grid gap-1.5 text-sm font-medium">E-mail de acesso<input className="field" autoComplete="email" type="email" required value={recoveryEmail} onChange={(e) => setRecoveryEmail(e.target.value)} /></label>
+      {message && <p className="mt-3 rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{message}</p>}
+      {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      <button className="btn btn-primary mt-5 w-full" disabled={loading}>{loading ? "Enviando..." : "Enviar link de recuperação"}</button>
+      <button className="btn btn-secondary mt-3 w-full" type="button" onClick={() => { setError(""); setMessage(""); setMode("login"); }}>Voltar para o login</button>
+    </form>
+  </main>;
+  if (mode === "reset") return <main className="grid min-h-screen place-items-center bg-slate-100 p-4">
+    <form onSubmit={resetPassword} className="panel w-full max-w-md p-6 shadow-sm">
+      <h1 className="text-2xl font-semibold">Criar nova senha</h1><p className="mt-1 text-sm text-slate-500">Use pelo menos 6 caracteres e guarde sua nova senha em local seguro.</p>
+      <div className="mt-5 grid gap-3"><label className="grid gap-1.5 text-sm font-medium">Nova senha<input className="field" type="password" minLength={6} autoComplete="new-password" required value={newPassword.password} onChange={(e) => setNewPassword({ ...newPassword, password: e.target.value })} /></label><label className="grid gap-1.5 text-sm font-medium">Confirmar nova senha<input className="field" type="password" minLength={6} autoComplete="new-password" required value={newPassword.confirm} onChange={(e) => setNewPassword({ ...newPassword, confirm: e.target.value })} /></label></div>
+      {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      <button className="btn btn-primary mt-5 w-full" disabled={loading}>{loading ? "Salvando..." : "Salvar nova senha"}</button>
+    </form>
+  </main>;
   if (mode === "login") return <main className="grid min-h-screen place-items-center bg-slate-100 p-4">
     <form onSubmit={submit} className="panel w-full max-w-md p-6 shadow-sm">
       <h1 className="text-2xl font-semibold">CEO Pet AI</h1>
@@ -579,7 +622,9 @@ function Login({ onSession }: { onSession: (session: Session) => void }) {
         <input className="field" aria-label="Senha" autoComplete="current-password" placeholder="Senha" type="password" required value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} />
       </div>
       {error && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {message && <p className="mt-3 rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{message}</p>}
       <button className="btn btn-primary mt-5 w-full" type="submit">Entrar</button>
+      <button className="mt-3 w-full text-sm font-medium text-brand-700 hover:underline" type="button" onClick={() => { setError(""); setMessage(""); setRecoveryEmail(loginForm.email); setMode("forgot"); }}>Esqueci minha senha</button>
       <button className="btn btn-secondary mt-3 w-full" type="button" onClick={() => { setError(""); setMode("register"); }}>Criar primeira conta</button>
     </form>
   </main>;
