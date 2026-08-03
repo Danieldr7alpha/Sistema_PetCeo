@@ -186,14 +186,17 @@ async function cashReportSummary(req: Request, res: import("express").Response) 
   const cid = companyId(req);
   const { from, to } = periodFromQuery(req);
   const cashSessionId = req.query.cashSessionId ? String(req.query.cashSessionId) : undefined;
+  const excludeCashSessionId = req.query.excludeCashSessionId ? String(req.query.excludeCashSessionId) : undefined;
+  const cashSessionFilter = cashSessionId ? { cashSessionId } : excludeCashSessionId ? { cashSessionId: { not: excludeCashSessionId } } : {};
   const sales = await prisma.sale.findMany({
-    where: { companyId: cid, ...(cashSessionId ? { cashSessionId } : { createdAt: { gte: from, lte: to } }) },
+    where: { companyId: cid, ...cashSessionFilter, ...(cashSessionId ? {} : { createdAt: { gte: from, lte: to } }) },
     include: { items: { include: { service: true, product: true } } }
   });
   const receivedPayments = await prisma.salePayment.findMany({
     where: {
       companyId: cid,
-      ...(cashSessionId ? { cashSessionId } : { paidAt: { gte: from, lte: to } }),
+      ...cashSessionFilter,
+      ...(cashSessionId ? {} : { paidAt: { gte: from, lte: to } }),
       sale: { status: { notIn: ["CANCELLED", "REFUNDED"] } }
     },
     include: { sale: { include: { customer: true, pet: true, receipt: true } } },

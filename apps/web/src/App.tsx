@@ -3204,9 +3204,10 @@ function CashReports({ isAdmin, cashSession }: { isAdmin: boolean; cashSession: 
   const range = cashPeriodRange(period, customFrom, customTo);
   const reportParams = period === "today" && cashSession
     ? `cashSessionId=${encodeURIComponent(cashSession.id)}`
-    : `from=${range.from}&to=${range.to}`;
-  const { data } = useData<CashReport>(isAdmin ? `/cash/reports/summary?${reportParams}` : "", [isAdmin, period, customFrom, customTo, cashSession?.id]);
-  const paymentDetails = data?.paymentDetails ?? [];
+    : `from=${range.from}&to=${range.to}${cashSession ? `&excludeCashSessionId=${encodeURIComponent(cashSession.id)}` : ""}`;
+  const { data, loading, refreshing } = useData<CashReport>(isAdmin ? `/cash/reports/summary?${reportParams}` : "", [isAdmin, period, customFrom, customTo, cashSession?.id]);
+  const reportData = loading || refreshing ? null : data;
+  const paymentDetails = reportData?.paymentDetails ?? [];
   const paymentGroups = [...paymentDetails.reduce((groups, payment) => {
     const isCard = payment.method === "DEBIT" || payment.method === "CREDIT";
     const brand = payment.cardBrand?.trim() || "Sem bandeira";
@@ -3218,20 +3219,21 @@ function CashReports({ isAdmin, cashSession }: { isAdmin: boolean; cashSession: 
     return groups;
   }, new Map<string, { key: string; title: string; method: PaymentMethod; payments: CashPaymentDetail[] }>()).values()];
   const summaryCards = [
-    { label: "PIX", value: data?.totalsByMethod?.PIX ?? 0 },
-    { label: "Dinheiro", value: data?.totalsByMethod?.CASH ?? 0 },
-    { label: "Cartão Débito", value: data?.totalsByMethod?.DEBIT ?? 0 },
-    { label: "Cartão Crédito", value: data?.totalsByMethod?.CREDIT ?? 0 },
-    { label: "Transferência", value: data?.totalsByMethod?.TRANSFER ?? 0 },
-    { label: "Cancelados", value: data?.cancelledTotal ?? 0 },
-    { label: "Desconto", value: data?.discountsTotal ?? 0 },
-    { label: "Total", value: data?.totalReceived ?? 0 }
+    { label: "PIX", value: reportData?.totalsByMethod?.PIX ?? 0 },
+    { label: "Dinheiro", value: reportData?.totalsByMethod?.CASH ?? 0 },
+    { label: "Cartão Débito", value: reportData?.totalsByMethod?.DEBIT ?? 0 },
+    { label: "Cartão Crédito", value: reportData?.totalsByMethod?.CREDIT ?? 0 },
+    { label: "Transferência", value: reportData?.totalsByMethod?.TRANSFER ?? 0 },
+    { label: "Cancelados", value: reportData?.cancelledTotal ?? 0 },
+    { label: "Desconto", value: reportData?.discountsTotal ?? 0 },
+    { label: "Total", value: reportData?.totalReceived ?? 0 }
   ];
   if (!isAdmin) return <div className="panel p-4 text-sm text-slate-600">Relatórios são visíveis apenas para administradores.</div>;
   return <div className="grid gap-4">
     <div className="panel grid gap-3 p-3 md:grid-cols-3"><select className="field" value={period} onChange={(event) => setPeriod(event.target.value)}><option value="today">Hoje</option><option value="yesterday">Ontem</option><option value="week">Semana</option><option value="month">Mês</option><option value="custom">Personalizado</option></select>{period === "custom" && <><input className="field" type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /><input className="field" type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></>}</div>
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">{summaryCards.map((card) => <div className="panel min-w-0 p-4" key={card.label}><p className="text-sm font-medium text-slate-500">{card.label}</p><b className="mt-1 block whitespace-nowrap text-lg">{currency(card.value)}</b></div>)}</div>
-    {paymentGroups.length > 0 && <div className="grid gap-4 lg:grid-cols-2">{paymentGroups.map((group) => <PaymentReportGroup key={group.key} title={group.title} method={group.method} payments={group.payments} />)}</div>}
+    {(loading || refreshing) && <div className="panel p-5 text-sm text-slate-600">Atualizando o relatório do período selecionado...</div>}
+    {!loading && !refreshing && <><div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">{summaryCards.map((card) => <div className="panel min-w-0 p-4" key={card.label}><p className="text-sm font-medium text-slate-500">{card.label}</p><b className="mt-1 block whitespace-nowrap text-lg">{currency(card.value)}</b></div>)}</div>
+    {paymentGroups.length > 0 && <div className="grid gap-4 lg:grid-cols-2">{paymentGroups.map((group) => <PaymentReportGroup key={group.key} title={group.title} method={group.method} payments={group.payments} />)}</div>}</>}
   </div>;
 }
 
