@@ -1811,8 +1811,9 @@ function Checkout({ draft, chargeSaleId, onClearDraft, session, sectionPage }: {
   const [loadedSale, setLoadedSale] = useState<Sale | null>(null);
   const [saleLoadError, setSaleLoadError] = useState("");
   const search = query.trim();
-  const { data: cashCurrent, refresh: refreshCash } = useData<CashCurrent>("/cash/current");
+  const { data: cashCurrent, error: cashCurrentError, loading: cashCurrentLoading, refresh: refreshCash } = useData<CashCurrent>("/cash/current");
   const cashSession = cashCurrent?.session ?? null;
+  const cashStateReady = cashCurrent !== null;
   const { data: waitingSales, refresh: refreshWaiting } = useData<Sale[]>(section === "pos" ? `/sales?status=WAITING_PAYMENT${search ? `&q=${encodeURIComponent(search)}` : ""}` : "", [section, search]);
   const { data: pendingSales, refresh: refreshPending } = useData<Sale[]>(section === "pos" ? `/sales?status=PENDING${search ? `&q=${encodeURIComponent(search)}` : ""}` : "", [section, search]);
   const { data: partialSales, refresh: refreshPartial } = useData<Sale[]>(section === "pos" ? `/sales?status=PARTIALLY_PAID${search ? `&q=${encodeURIComponent(search)}` : ""}` : "", [section, search]);
@@ -1886,12 +1887,16 @@ function Checkout({ draft, chargeSaleId, onClearDraft, session, sectionPage }: {
     {section !== "pos" && <button className="btn btn-secondary mb-4" type="button" onClick={() => setSection("pos")}>Voltar ao Caixa</button>}
 
     {saleLoadError && section === "pos" && <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{saleLoadError}</p>}
-    {section === "pos" && <CashPointOfSaleLayout cashSession={cashSession} query={query} setQuery={setQuery} loadedSale={loadedSale} waitingSales={waitingSales ?? []} pendingSales={[...(partialSales ?? []), ...(pendingSales ?? [])]} onOpened={refreshCash} onShortcut={setSection} onOpenSale={openSaleInPos} onSaved={clearLoadedSale} session={session} />}
-    {section === "session" && <CashSessionPanel cashSession={cashSession} onRefresh={refreshCash} />}
+    {["pos", "session", "movements"].includes(section) && !cashStateReady && <div className="panel p-5">
+      {(cashCurrentLoading || !cashCurrentError) && <p className="text-sm text-slate-600">Verificando o caixa aberto...</p>}
+      {!cashCurrentLoading && cashCurrentError && <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-red-700">{cashCurrentError}</p><button className="btn btn-secondary" type="button" onClick={refreshCash}>Tentar novamente</button></div>}
+    </div>}
+    {section === "pos" && cashStateReady && <CashPointOfSaleLayout cashSession={cashSession} query={query} setQuery={setQuery} loadedSale={loadedSale} waitingSales={waitingSales ?? []} pendingSales={[...(partialSales ?? []), ...(pendingSales ?? [])]} onOpened={refreshCash} onShortcut={setSection} onOpenSale={openSaleInPos} onSaved={clearLoadedSale} session={session} />}
+    {section === "session" && cashStateReady && <CashSessionPanel cashSession={cashSession} onRefresh={refreshCash} />}
     {section === "sales" && <CashSalesHistory />}
     {section === "preSales" && <CashPreSales onReceive={(sale) => setSaleModal({ sale })} />}
     {section === "pending" && <CashPendingSales onOpenInPos={openSaleInPos} />}
-    {section === "movements" && <CashMovements cashSession={cashSession} onRefresh={refreshCash} />}
+    {section === "movements" && cashStateReady && <CashMovements cashSession={cashSession} onRefresh={refreshCash} />}
     {section === "reports" && <CashReports isAdmin={session.user.role === "ADMIN"} />}
 
     {saleModal && <SaleReceiveModal sale={saleModal.sale} session={session} cashSession={cashSession} onClose={() => setSaleModal(null)} onSaved={() => { setSaleModal(null); refreshPos(); }} />}
