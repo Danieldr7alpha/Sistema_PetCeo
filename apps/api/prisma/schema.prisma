@@ -171,6 +171,11 @@ enum SettlementDayType {
   BUSINESS
 }
 
+enum PaymentSettlementContract {
+  SCHEDULED
+  SAME_DAY
+}
+
 model Company {
   id                      String                   @id @default(cuid())
   name                    String
@@ -688,19 +693,19 @@ model SalesReceipt {
 }
 
 model SalePayment {
-  id                                String                  @id @default(cuid())
+  id                                String                     @id @default(cuid())
   companyId                         String
   saleId                            String
   cashSessionId                     String?
   method                            PaymentMethod
-  amount                            Decimal                 @db.Decimal(10, 2)
+  amount                            Decimal                    @db.Decimal(10, 2)
   cardBrand                         String?
   cardNsu                           String?
   cardAuthorization                 String?
   installments                      Int?
   pixReference                      String?
-  cashReceived                      Decimal?                @db.Decimal(10, 2)
-  changeAmount                      Decimal?                @db.Decimal(10, 2)
+  cashReceived                      Decimal?                   @db.Decimal(10, 2)
+  changeAmount                      Decimal?                   @db.Decimal(10, 2)
   operatorId                        String?
   operatorName                      String?
   financialPaymentMethodId          String?
@@ -708,26 +713,44 @@ model SalePayment {
   paymentTypeSnapshot               String?
   institutionNameSnapshot           String?
   destinationAccountId              String?
-  grossAmount                       Decimal?                @db.Decimal(10, 2)
-  feePercentageSnapshot             Decimal?                @db.Decimal(7, 4)
-  anticipated                       Boolean                 @default(false)
-  anticipationFeePercentageSnapshot Decimal?                @db.Decimal(7, 4)
-  fixedFeeSnapshot                  Decimal?                @db.Decimal(10, 2)
-  feeAmount                         Decimal?                @db.Decimal(10, 2)
-  netAmount                         Decimal?                @db.Decimal(10, 2)
+  grossAmount                       Decimal?                   @db.Decimal(10, 2)
+  feePercentageSnapshot             Decimal?                   @db.Decimal(7, 4)
+  anticipated                       Boolean                    @default(false)
+  anticipationFeePercentageSnapshot Decimal?                   @db.Decimal(7, 4)
+  fixedFeeSnapshot                  Decimal?                   @db.Decimal(10, 2)
+  feeAmount                         Decimal?                   @db.Decimal(10, 2)
+  netAmount                         Decimal?                   @db.Decimal(10, 2)
   settlementDaysSnapshot            Int?
+  settlementDayTypeSnapshot         SettlementDayType?
+  settlementContractSnapshot        PaymentSettlementContract?
   expectedSettlementDate            DateTime?
   cardBrandSnapshot                 String?
-  paidAt                            DateTime                @default(now())
-  sale                              Sale                    @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  cashSession                       CashSession?            @relation(fields: [cashSessionId], references: [id])
-  financialPaymentMethod            FinancialPaymentMethod? @relation(fields: [financialPaymentMethodId], references: [id])
-  destinationAccount                FinancialAccount?       @relation(fields: [destinationAccountId], references: [id])
+  paidAt                            DateTime                   @default(now())
+  sale                              Sale                       @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  cashSession                       CashSession?               @relation(fields: [cashSessionId], references: [id])
+  financialPaymentMethod            FinancialPaymentMethod?    @relation(fields: [financialPaymentMethodId], references: [id])
+  destinationAccount                FinancialAccount?          @relation(fields: [destinationAccountId], references: [id])
+  settlementInstallments            SalePaymentInstallment[]
 
   @@index([companyId, saleId])
   @@index([companyId, cashSessionId])
   @@index([companyId, expectedSettlementDate])
   @@index([companyId, destinationAccountId])
+}
+
+model SalePaymentInstallment {
+  id                     String      @id @default(cuid())
+  salePaymentId          String
+  installmentNumber      Int
+  grossAmount            Decimal     @db.Decimal(10, 2)
+  feeAmount              Decimal     @db.Decimal(10, 2)
+  netAmount              Decimal     @db.Decimal(10, 2)
+  expectedSettlementDate DateTime
+  createdAt              DateTime    @default(now())
+  salePayment            SalePayment @relation(fields: [salePaymentId], references: [id], onDelete: Cascade)
+
+  @@unique([salePaymentId, installmentNumber])
+  @@index([expectedSettlementDate])
 }
 
 model FinancialAccount {
@@ -757,27 +780,28 @@ model FinancialAccount {
 }
 
 model FinancialPaymentMethod {
-  id                        String               @id @default(cuid())
+  id                        String                    @id @default(cuid())
   companyId                 String
   name                      String
   type                      FinancialPaymentType
   institutionName           String?
   destinationAccountId      String
-  defaultFeePercentage      Decimal              @default(0) @db.Decimal(7, 4)
-  fixedFee                  Decimal              @default(0) @db.Decimal(10, 2)
-  allowsAnticipation        Boolean              @default(false)
-  anticipationFeePercentage Decimal              @default(0) @db.Decimal(7, 4)
-  settlementDays            Int                  @default(0)
-  settlementDayType         SettlementDayType    @default(CALENDAR)
-  maxInstallments           Int                  @default(1)
-  requiresNsu               Boolean              @default(false)
-  requiresReceiptCode       Boolean              @default(false)
-  active                    Boolean              @default(true)
+  defaultFeePercentage      Decimal                   @default(0) @db.Decimal(7, 4)
+  fixedFee                  Decimal                   @default(0) @db.Decimal(10, 2)
+  allowsAnticipation        Boolean                   @default(false)
+  anticipationFeePercentage Decimal                   @default(0) @db.Decimal(7, 4)
+  settlementDays            Int                       @default(0)
+  settlementDayType         SettlementDayType         @default(CALENDAR)
+  settlementContract        PaymentSettlementContract @default(SCHEDULED)
+  maxInstallments           Int                       @default(1)
+  requiresNsu               Boolean                   @default(false)
+  requiresReceiptCode       Boolean                   @default(false)
+  active                    Boolean                   @default(true)
   notes                     String?
-  createdAt                 DateTime             @default(now())
-  updatedAt                 DateTime             @updatedAt
-  company                   Company              @relation(fields: [companyId], references: [id])
-  destinationAccount        FinancialAccount     @relation(fields: [destinationAccountId], references: [id])
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
+  company                   Company                   @relation(fields: [companyId], references: [id])
+  destinationAccount        FinancialAccount          @relation(fields: [destinationAccountId], references: [id])
   brands                    PaymentMethodBrand[]
   feeRules                  PaymentFeeRule[]
   salePayments              SalePayment[]
@@ -801,25 +825,26 @@ model PaymentMethodBrand {
 }
 
 model PaymentFeeRule {
-  id                        String                 @id @default(cuid())
+  id                        String                    @id @default(cuid())
   companyId                 String
   paymentMethodId           String
   cardBrandId               String?
   installments              Int?
-  feePercentage             Decimal                @default(0) @db.Decimal(7, 4)
-  fixedFee                  Decimal                @default(0) @db.Decimal(10, 2)
-  allowsAnticipation        Boolean                @default(false)
-  anticipationFeePercentage Decimal                @default(0) @db.Decimal(7, 4)
-  settlementDays            Int                    @default(0)
-  settlementDayType         SettlementDayType      @default(CALENDAR)
+  feePercentage             Decimal                   @default(0) @db.Decimal(7, 4)
+  fixedFee                  Decimal                   @default(0) @db.Decimal(10, 2)
+  allowsAnticipation        Boolean                   @default(false)
+  anticipationFeePercentage Decimal                   @default(0) @db.Decimal(7, 4)
+  settlementDays            Int                       @default(0)
+  settlementDayType         SettlementDayType         @default(CALENDAR)
+  settlementContract        PaymentSettlementContract @default(SCHEDULED)
   effectiveFrom             DateTime
   effectiveUntil            DateTime?
-  active                    Boolean                @default(true)
-  createdAt                 DateTime               @default(now())
-  updatedAt                 DateTime               @updatedAt
-  company                   Company                @relation(fields: [companyId], references: [id])
-  paymentMethod             FinancialPaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Cascade)
-  cardBrand                 PaymentMethodBrand?    @relation(fields: [cardBrandId], references: [id])
+  active                    Boolean                   @default(true)
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
+  company                   Company                   @relation(fields: [companyId], references: [id])
+  paymentMethod             FinancialPaymentMethod    @relation(fields: [paymentMethodId], references: [id], onDelete: Cascade)
+  cardBrand                 PaymentMethodBrand?       @relation(fields: [cardBrandId], references: [id])
 
   @@index([companyId, paymentMethodId, active])
   @@index([paymentMethodId, installments, effectiveFrom])

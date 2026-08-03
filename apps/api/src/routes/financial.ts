@@ -41,6 +41,7 @@ const paymentMethodSchema = z.object({
   anticipationFeePercentage: z.coerce.number().min(0).max(100).default(0),
   settlementDays: z.coerce.number().int().min(0).max(365).default(0),
   settlementDayType: z.enum(["CALENDAR", "BUSINESS"]).default("CALENDAR"),
+  settlementContract: z.enum(["SCHEDULED", "SAME_DAY"]).default("SCHEDULED"),
   maxInstallments: z.coerce.number().int().min(1).max(24).default(1),
   requiresNsu: z.boolean().default(false),
   requiresReceiptCode: z.boolean().default(false),
@@ -58,6 +59,7 @@ const feeRuleSchema = z.object({
   anticipationFeePercentage: z.coerce.number().min(0).max(100).default(0),
   settlementDays: z.coerce.number().int().min(0).max(365).default(0),
   settlementDayType: z.enum(["CALENDAR", "BUSINESS"]).default("CALENDAR"),
+  settlementContract: z.enum(["SCHEDULED", "SAME_DAY"]).default("SCHEDULED"),
   effectiveFrom: z.string().date(),
   effectiveUntil: z.string().date().optional(),
   active: z.boolean().default(true)
@@ -82,12 +84,20 @@ financialRouter.use(requireAdmin);
 financialRouter.get("/accounts", async (req, res) => {
   const cid = companyId(req);
   const accounts = await prisma.financialAccount.findMany({ where: { companyId: cid }, orderBy: [{ active: "desc" }, { name: "asc" }] });
-  const totals = await prisma.salePayment.groupBy({
+  const legacyTotals = await prisma.salePayment.groupBy({
     by: ["destinationAccountId"],
-    where: { companyId: cid, destinationAccountId: { not: null }, expectedSettlementDate: { lte: new Date() } },
+    where: { companyId: cid, destinationAccountId: { not: null }, expectedSettlementDate: { lte: new Date() }, settlementInstallments: { none: {} } },
     _sum: { netAmount: true }
   });
-  const receivedByAccount = new Map(totals.map((item) => [item.destinationAccountId, Number(item._sum.netAmount ?? 0)]));
+  const dueInstallments = await prisma.salePaymentInstallment.findMany({
+    where: { expectedSettlementDate: { lte: new Date() }, salePayment: { companyId: cid, destinationAccountId: { not: null } } },
+    select: { netAmount: true, salePayment: { select: { destinationAccountId: true } } }
+  });
+  const receivedByAccount = new Map(legacyTotals.map((item) => [item.destinationAccountId, Number(item._sum.netAmount ?? 0)]));
+  for (const installment of dueInstallments) {
+    const accountId = installment.salePayment.destinationAccountId;
+    if (accountId) receivedByAccount.set(accountId, (receivedByAccount.get(accountId) ?? 0) + Number(installment.netAmount));
+  }
   res.json(accounts.map((account) => ({
     ...account,
     calculatedBalance: Number(account.openingBalance) + (receivedByAccount.get(account.id) ?? 0)

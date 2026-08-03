@@ -71,8 +71,8 @@ type ReusableKind = "product-category" | "product-brand" | "supplier" | "service
 type ReusableEditTarget = { kind: ReusableKind; label: string; option: ReusableOption };
 type ConnectionState = "UNKNOWN" | "CHECKING" | "ONLINE" | "OFFLINE" | "SYNCING";
 type FinancialAccount = { id: string; name: string; type: "CASH_DRAWER" | "CHECKING_ACCOUNT" | "SAVINGS_ACCOUNT" | "DIGITAL_ACCOUNT" | "PAYMENT_WALLET" | "OTHER"; institutionName?: string | null; openingBalance: number | string; openingBalanceDate: string; calculatedBalance?: number; isPrimary: boolean; active: boolean; notes?: string | null };
-type FinancialFeeRule = { id: string; installments?: number | null; feePercentage: number | string; fixedFee: number | string; allowsAnticipation: boolean; anticipationFeePercentage: number | string; settlementDays: number; effectiveFrom: string; effectiveUntil?: string | null; active: boolean };
-type FinancialPaymentMethod = { id: string; name: string; type: "CASH" | "PIX" | "DEBIT_CARD" | "CREDIT_CARD" | "BANK_TRANSFER" | "OTHER"; institutionName?: string | null; destinationAccountId: string; destinationAccount: FinancialAccount; defaultFeePercentage: number | string; fixedFee: number | string; allowsAnticipation: boolean; anticipationFeePercentage: number | string; settlementDays: number; settlementDayType: "CALENDAR" | "BUSINESS"; maxInstallments: number; requiresNsu: boolean; requiresReceiptCode: boolean; active: boolean; brands: { id: string; brandName: string; active: boolean }[]; feeRules: FinancialFeeRule[] };
+type FinancialFeeRule = { id: string; installments?: number | null; feePercentage: number | string; fixedFee: number | string; allowsAnticipation: boolean; anticipationFeePercentage: number | string; settlementDays: number; settlementDayType?: "CALENDAR" | "BUSINESS"; settlementContract?: "SCHEDULED" | "SAME_DAY"; effectiveFrom: string; effectiveUntil?: string | null; active: boolean };
+type FinancialPaymentMethod = { id: string; name: string; type: "CASH" | "PIX" | "DEBIT_CARD" | "CREDIT_CARD" | "BANK_TRANSFER" | "OTHER"; institutionName?: string | null; destinationAccountId: string; destinationAccount: FinancialAccount; defaultFeePercentage: number | string; fixedFee: number | string; allowsAnticipation: boolean; anticipationFeePercentage: number | string; settlementDays: number; settlementDayType: "CALENDAR" | "BUSINESS"; settlementContract: "SCHEDULED" | "SAME_DAY"; maxInstallments: number; requiresNsu: boolean; requiresReceiptCode: boolean; active: boolean; brands: { id: string; brandName: string; active: boolean }[]; feeRules: FinancialFeeRule[] };
 
 const genderLabels: Record<string, string> = { MALE: "Masculino", FEMALE: "Feminino", OTHER: "Outro", UNINFORMED: "Prefiro não informar" };
 const petStatusLabels: Record<string, string> = { ACTIVE: "Ativo", INACTIVE: "Inativo", DECEASED: "Falecido" };
@@ -2672,7 +2672,8 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
   function anticipationConfig(row: PosPaymentForm) {
     const method = financialMethods?.find((item) => item.id === row.financialPaymentMethodId);
     const rule = method?.feeRules?.find((item) => item.installments === Number(row.installments || 1));
-    return { allowed: rule?.allowsAnticipation ?? method?.allowsAnticipation ?? false, fee: Number(rule?.anticipationFeePercentage ?? method?.anticipationFeePercentage ?? 0) };
+    const immediateCredit = method?.type === "CREDIT_CARD" && (rule?.settlementContract ?? method?.settlementContract) === "SAME_DAY";
+    return { allowed: !immediateCredit && (rule?.allowsAnticipation ?? method?.allowsAnticipation ?? false), immediateCredit, fee: Number(rule?.anticipationFeePercentage ?? method?.anticipationFeePercentage ?? 0) };
   }
 
   function removeRow(index: number) {
@@ -2699,7 +2700,7 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
         installments: row.method === "CREDIT" ? Number(row.installments || 0) : undefined,
         cashReceived: row.method === "CASH" ? decimalFromCents(row.cashReceivedCents) : undefined,
         changeAmount: row.method === "CASH" ? Math.max(0, decimalFromCents(row.cashReceivedCents) - decimalFromCents(row.amountCents)) : undefined,
-        anticipated: Boolean(row.anticipate)
+        anticipated: anticipationConfig(row).immediateCredit || Boolean(row.anticipate)
       }))
       .filter((payment) => payment.amount > 0);
   }
@@ -2785,6 +2786,7 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
               <button className="btn btn-secondary" type="button" disabled={rows.length === 1} onClick={() => removeRow(index)}><Trash2 size={16} /></button>
             </div>
             {anticipationConfig(row).allowed && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(row.anticipate)} onChange={(event) => updateRow(index, { anticipate: event.target.checked })} />Antecipar recebimento — taxa de {anticipationConfig(row).fee.toLocaleString("pt-BR")}%</label>}
+            {anticipationConfig(row).immediateCredit && <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">Crédito com recebimento no mesmo dia — a taxa de antecipação de {anticipationConfig(row).fee.toLocaleString("pt-BR")}% será aplicada automaticamente.</p>}
             {errors[`amount-${index}`] && <p className="text-sm text-red-700">{errors[`amount-${index}`]}</p>}
             {errors[`method-${index}`] && <p className="text-sm text-red-700">{errors[`method-${index}`]}</p>}
             {errors[`cash-${index}`] && <p className="text-sm text-red-700">{errors[`cash-${index}`]}</p>}
@@ -3665,7 +3667,7 @@ function FinancialModule({ sectionPage }: { sectionPage: string }) {
   </Page>;
   if (sectionPage === "financial:methods") return <Page title="Formas de recebimento" action={<button className="btn btn-primary" disabled={!accounts?.some((account) => account.active)} onClick={() => setMethodOpen(true)}><Plus size={16} />Nova forma</button>}>
     {!accounts?.some((account) => account.active) && <p className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Cadastre uma conta financeira ativa antes de criar formas de recebimento.</p>}
-    <DataCards items={(methods ?? []).map((method) => ({ title: method.name, subtitle: `${financialPaymentTypeLabels[method.type]} · ${method.institutionName ?? "Sem instituição"} · Destino: ${method.destinationAccount.name}`, meta: `Taxa padrão: ${Number(method.defaultFeePercentage).toLocaleString("pt-BR")}% + ${currency(method.fixedFee)} | Prazo: ${method.settlementDays} dia(s) | ${method.feeRules.length} regra(s) vigente(s)`, status: method.active ? "Ativa" : "Inativa", action: <div className="flex flex-wrap gap-2"><button className="btn btn-secondary" onClick={() => setRuleMethod(method)}>Nova regra de taxa</button>{method.active && <button className="btn btn-secondary" onClick={async () => { await api(`/financial/payment-methods/${method.id}`, { method: "PATCH", body: JSON.stringify({ active: false }) }); refreshMethods(); }}>Inativar</button>}</div> }))} />
+    <DataCards items={(methods ?? []).map((method) => ({ title: method.name, subtitle: `${financialPaymentTypeLabels[method.type]} · ${method.institutionName ?? "Sem instituição"} · Destino: ${method.destinationAccount.name}`, meta: `Taxa padrão: ${Number(method.defaultFeePercentage).toLocaleString("pt-BR")}% + ${currency(method.fixedFee)} | Contrato: ${method.settlementContract === "SAME_DAY" ? "mesmo dia" : `${method.settlementDays} dia(s) ${method.settlementDayType === "BUSINESS" ? "úteis" : "corridos"}`} | ${method.feeRules.length} regra(s)`, status: method.active ? "Ativa" : "Inativa", action: <div className="flex flex-wrap gap-2"><button className="btn btn-secondary" onClick={() => setRuleMethod(method)}>Nova regra de taxa</button>{method.active && <button className="btn btn-secondary" onClick={async () => { await api(`/financial/payment-methods/${method.id}`, { method: "PATCH", body: JSON.stringify({ active: false }) }); refreshMethods(); }}>Inativar</button>}</div> }))} />
     {methodOpen && <FinancialMethodModal accounts={(accounts ?? []).filter((account) => account.active)} onClose={() => setMethodOpen(false)} onSaved={() => { setMethodOpen(false); refreshMethods(); }} />}
     {ruleMethod && <FinancialFeeRuleModal method={ruleMethod} onClose={() => setRuleMethod(null)} onSaved={() => { setRuleMethod(null); refreshMethods(); }} />}
   </Page>;
@@ -3683,7 +3685,7 @@ function FinancialAccountModal({ onClose, onSaved }: { onClose: () => void; onSa
 
 function FinancialMethodModal({ accounts, onClose, onSaved }: { accounts: FinancialAccount[]; onClose: () => void; onSaved: () => void }) {
   type RateRow = { fee: string; anticipates: boolean; anticipationFee: string };
-  const [form, setForm] = useState({ name: "", type: "PIX", institutionName: "", destinationAccountId: accounts[0]?.id ?? "", maxInstallments: 1, brands: "" });
+  const [form, setForm] = useState({ name: "", type: "PIX", institutionName: "", destinationAccountId: accounts[0]?.id ?? "", maxInstallments: 1, brands: "", settlementContract: "SCHEDULED", settlementDays: "1", settlementDayType: "BUSINESS" });
   const [rates, setRates] = useState<RateRow[]>([{ fee: "", anticipates: false, anticipationFee: "" }]);
   const [error, setError] = useState("");
   const isCredit = form.type === "CREDIT_CARD";
@@ -3699,10 +3701,13 @@ function FinancialMethodModal({ accounts, onClose, onSaved }: { accounts: Financ
     if (!form.name.trim()) return setError("Informe o nome da forma de pagamento.");
     if (!form.destinationAccountId) return setError("Selecione o banco ou a conta que receberá o dinheiro.");
     if (isCard && rates.some((row) => row.fee.trim() === "")) return setError("Informe a taxa de todas as parcelas.");
-    if (rates.some((row) => row.anticipates && row.anticipationFee.trim() === "")) return setError("Informe a taxa de antecipação nas parcelas marcadas.");
+    const sameDayCredit = isCredit && form.settlementContract === "SAME_DAY";
+    if (form.settlementContract === "SCHEDULED" && Number(form.settlementDays) < 1) return setError("Informe em quantos dias o dinheiro será recebido.");
+    if (sameDayCredit && rates.some((row) => row.anticipationFee.trim() === "")) return setError("Informe a taxa de antecipação de todas as parcelas.");
     try {
-      const created = await api<FinancialPaymentMethod>("/financial/payment-methods", { method: "POST", body: JSON.stringify({ name: form.name, type: form.type, institutionName: form.institutionName, destinationAccountId: form.destinationAccountId, defaultFeePercentage: Number((rates[0]?.fee || "0").replace(",", ".")), fixedFee: 0, allowsAnticipation: rates.some((row) => row.anticipates), anticipationFeePercentage: Number((rates.find((row) => row.anticipates)?.anticipationFee || "0").replace(",", ".")), settlementDays: 0, settlementDayType: "CALENDAR", maxInstallments: isCredit ? form.maxInstallments : 1, requiresNsu: isCard, requiresReceiptCode: false, active: true, brands: isCard ? form.brands.split(",").map((item) => item.trim()).filter(Boolean) : [] }) });
-      await Promise.all(rates.map((row, index) => api(`/financial/payment-methods/${created.id}/fee-rules`, { method: "POST", body: JSON.stringify({ installments: isCredit ? index + 1 : undefined, feePercentage: Number((row.fee || "0").replace(",", ".")), fixedFee: 0, allowsAnticipation: row.anticipates, anticipationFeePercentage: row.anticipates ? Number((row.anticipationFee || "0").replace(",", ".")) : 0, settlementDays: 0, settlementDayType: "CALENDAR", effectiveFrom: localDateInput(), active: true }) })));
+      const settlementDays = form.settlementContract === "SAME_DAY" ? 0 : Number(form.settlementDays);
+      const created = await api<FinancialPaymentMethod>("/financial/payment-methods", { method: "POST", body: JSON.stringify({ name: form.name, type: form.type, institutionName: form.institutionName, destinationAccountId: form.destinationAccountId, defaultFeePercentage: Number((rates[0]?.fee || "0").replace(",", ".")), fixedFee: 0, allowsAnticipation: sameDayCredit, anticipationFeePercentage: sameDayCredit ? Number((rates[0]?.anticipationFee || "0").replace(",", ".")) : 0, settlementDays, settlementDayType: form.settlementDayType, settlementContract: form.settlementContract, maxInstallments: isCredit ? form.maxInstallments : 1, requiresNsu: isCard, requiresReceiptCode: false, active: true, brands: isCard ? form.brands.split(",").map((item) => item.trim()).filter(Boolean) : [] }) });
+      await Promise.all(rates.map((row, index) => api(`/financial/payment-methods/${created.id}/fee-rules`, { method: "POST", body: JSON.stringify({ installments: isCredit ? index + 1 : undefined, feePercentage: Number((row.fee || "0").replace(",", ".")), fixedFee: 0, allowsAnticipation: sameDayCredit, anticipationFeePercentage: sameDayCredit ? Number((row.anticipationFee || "0").replace(",", ".")) : 0, settlementDays, settlementDayType: form.settlementDayType, settlementContract: form.settlementContract, effectiveFrom: localDateInput(), active: true }) })));
       onSaved();
     } catch (e) { setError(e instanceof Error ? e.message : "Não foi possível salvar a forma de pagamento."); }
   }
@@ -3715,12 +3720,15 @@ function FinancialMethodModal({ accounts, onClose, onSaved }: { accounts: Financ
       {isCredit && <label className="text-sm font-semibold">Quantidade máxima de parcelas<select className="field mt-1" value={form.maxInstallments} onChange={(e) => setInstallmentCount(Number(e.target.value))}>{Array.from({ length: 12 }, (_, index) => index + 1).map((count) => <option value={count} key={count}>{count}x</option>)}</select></label>}
       {isCard && <label className="text-sm font-semibold">Bandeiras aceitas<input className="field mt-1" placeholder="Ex.: Visa, Mastercard, Elo" value={form.brands} onChange={(e) => setForm({ ...form, brands: e.target.value })} /></label>}
     </div>
-    <div><h3 className="font-semibold">Taxas {isCredit ? "por parcela" : "do pagamento à vista"}</h3><p className="text-sm text-slate-500">A taxa normal será sempre descontada. A antecipação só será aplicada quando estiver marcada.</p></div>
+    <section className="rounded-lg border border-slate-200 bg-slate-50 p-4"><h3 className="font-semibold">Contrato de recebimento</h3><p className="mb-4 text-sm text-slate-500">Informe quando a instituição deposita o valor na conta.</p><div className="grid gap-4 sm:grid-cols-2">
+      <label className="text-sm font-semibold">Tipo de contrato<select className="field mt-1" value={form.settlementContract} onChange={(e) => setForm({ ...form, settlementContract: e.target.value })}><option value="SCHEDULED">Receber após um prazo</option><option value="SAME_DAY">Receber no mesmo dia</option></select></label>
+      {form.settlementContract === "SCHEDULED" ? <><label className="text-sm font-semibold">Como contar os dias<select className="field mt-1" value={form.settlementDayType} onChange={(e) => setForm({ ...form, settlementDayType: e.target.value })}><option value="BUSINESS">Dias úteis — não conta sábado e domingo</option><option value="CALENDAR">Dias corridos — conta todos os dias</option></select></label><label className="text-sm font-semibold">Prazo para receber (dias)<input className="field mt-1" inputMode="numeric" placeholder="Ex.: 30" value={form.settlementDays} onChange={(e) => setForm({ ...form, settlementDays: onlyDigits(e.target.value, 3) })} /><small className="mt-1 block font-normal text-slate-500">Exemplo: 30 significa que a primeira parcela será recebida após 30 dias.</small></label></> : <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"><b>Prazo: mesmo dia</b><p>{isCredit ? "No crédito, informe abaixo também a taxa de antecipação." : "No débito ou PIX será descontada somente a taxa normal informada abaixo."}</p></div>}
+    </div></section>
+    <div><h3 className="font-semibold">Taxas {isCredit ? "por parcela" : "do pagamento à vista"}</h3><p className="text-sm text-slate-500">A taxa normal será descontada do valor de cada pagamento.</p></div>
     <div className="grid gap-3">{rates.map((row, index) => <div className="grid items-end gap-3 rounded-lg border border-slate-200 p-3 sm:grid-cols-[80px_1fr_180px_1fr]" key={index}>
       <div className="rounded-md bg-slate-100 px-3 py-2 text-center font-semibold">{isCredit ? `${index + 1}x` : "À vista"}</div>
       <label className="text-sm font-semibold">Taxa normal (%)<input className="field mt-1" inputMode="decimal" placeholder={form.type === "PIX" ? "Opcional — ex.: 0,99" : "Obrigatória — ex.: 3,16"} value={row.fee} onChange={(e) => updateRate(index, { fee: e.target.value })} /></label>
-      <label className="flex h-10 items-center gap-2 text-sm"><input type="checkbox" checked={row.anticipates} onChange={(e) => updateRate(index, { anticipates: e.target.checked, anticipationFee: e.target.checked ? row.anticipationFee : "" })} />Tem antecipação</label>
-      {row.anticipates ? <label className="text-sm font-semibold">Taxa de antecipação (%)<input className="field mt-1" inputMode="decimal" placeholder="Ex.: 5,30" value={row.anticipationFee} onChange={(e) => updateRate(index, { anticipationFee: e.target.value })} /></label> : <p className="pb-2 text-sm text-slate-400">Sem taxa de antecipação</p>}
+      {isCredit && form.settlementContract === "SAME_DAY" ? <><div className="pb-2 text-sm font-medium text-emerald-700">Antecipação imediata</div><label className="text-sm font-semibold">Taxa de antecipação (%)<input className="field mt-1" inputMode="decimal" placeholder="Ex.: 1,56" value={row.anticipationFee} onChange={(e) => updateRate(index, { anticipationFee: e.target.value })} /></label></> : <p className="pb-2 text-sm text-slate-400 sm:col-span-2">{form.settlementContract === "SAME_DAY" ? "Recebimento no mesmo dia" : "Recebimento no prazo do contrato"}</p>}
     </div>)}</div>
     {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}<div className="flex justify-end"><button className="btn btn-primary">Salvar forma de pagamento</button></div>
   </form></Modal>;

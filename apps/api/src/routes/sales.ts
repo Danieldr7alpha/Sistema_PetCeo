@@ -660,12 +660,25 @@ async function buildPaymentPlan(
       );
       const feePercentage = Number(matchingRule?.feePercentage ?? configured?.defaultFeePercentage ?? 0);
       const allowsAnticipation = matchingRule?.allowsAnticipation ?? configured?.allowsAnticipation ?? false;
-      const anticipationFeePercentage = payment.anticipated && allowsAnticipation ? Number(matchingRule?.anticipationFeePercentage ?? configured?.anticipationFeePercentage ?? 0) : 0;
+      const settlementContract = matchingRule?.settlementContract ?? configured?.settlementContract ?? "SCHEDULED";
+      const immediateCredit = configured?.type === "CREDIT_CARD" && settlementContract === "SAME_DAY";
+      const anticipated = immediateCredit || (payment.anticipated && allowsAnticipation);
+      const anticipationFeePercentage = anticipated ? Number(matchingRule?.anticipationFeePercentage ?? configured?.anticipationFeePercentage ?? 0) : 0;
       const fixedFee = Number(matchingRule?.fixedFee ?? configured?.fixedFee ?? 0);
       const grossCents = Math.round(payment.amount * 100);
       const feeCents = Math.min(grossCents, Math.round(grossCents * (feePercentage + anticipationFeePercentage) / 100) + Math.round(fixedFee * 100));
       const settlementDays = matchingRule?.settlementDays ?? configured?.settlementDays ?? 0;
       const settlementDayType = matchingRule?.settlementDayType ?? configured?.settlementDayType ?? "CALENDAR";
+      const installmentCount = configured?.type === "CREDIT_CARD" ? Math.max(1, payment.installments ?? 1) : 1;
+      const settlementInstallments = Array.from({ length: installmentCount }, (_, index) => {
+        const installmentNumber = index + 1;
+        const grossBase = Math.floor(grossCents / installmentCount);
+        const feeBase = Math.floor(feeCents / installmentCount);
+        const grossInstallmentCents = grossBase + (index < grossCents % installmentCount ? 1 : 0);
+        const feeInstallmentCents = feeBase + (index < feeCents % installmentCount ? 1 : 0);
+        const dueDays = settlementContract === "SAME_DAY" || anticipated ? 0 : settlementDays * installmentNumber;
+        return { installmentNumber, grossAmount: grossInstallmentCents / 100, feeAmount: feeInstallmentCents / 100, netAmount: (grossInstallmentCents - feeInstallmentCents) / 100, expectedSettlementDate: addSettlementDays(dueDays, settlementDayType) };
+      });
       return {
         companyId: cid,
         cashSessionId,
@@ -687,13 +700,16 @@ async function buildPaymentPlan(
         destinationAccountId: configured?.destinationAccountId,
         grossAmount: grossCents / 100,
         feePercentageSnapshot: feePercentage,
-        anticipated: anticipationFeePercentage > 0,
+        anticipated,
         anticipationFeePercentageSnapshot: anticipationFeePercentage,
         fixedFeeSnapshot: fixedFee,
         feeAmount: feeCents / 100,
         netAmount: (grossCents - feeCents) / 100,
         settlementDaysSnapshot: settlementDays,
-        expectedSettlementDate: addSettlementDays(settlementDays, settlementDayType),
+        settlementDayTypeSnapshot: settlementDayType,
+        settlementContractSnapshot: settlementContract,
+        expectedSettlementDate: settlementInstallments[0].expectedSettlementDate,
+        settlementInstallments: { create: settlementInstallments },
         cardBrandSnapshot: payment.cardBrand
       };
     })
