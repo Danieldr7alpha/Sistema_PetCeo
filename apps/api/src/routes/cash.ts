@@ -187,6 +187,13 @@ async function cashReportSummary(req: Request, res: import("express").Response) 
   const { from, to } = periodFromQuery(req);
   const cashSessionId = req.query.cashSessionId ? String(req.query.cashSessionId) : undefined;
   const cashSessionFilter = cashSessionId ? { cashSessionId } : {};
+  const sessions = await prisma.cashSession.findMany({
+    where: cashSessionId
+      ? { companyId: cid, id: cashSessionId }
+      : { companyId: cid, openedAt: { lte: to }, OR: [{ closedAt: null }, { closedAt: { gte: from } }] },
+    include: { movements: { orderBy: { createdAt: "asc" } } },
+    orderBy: { openedAt: "asc" }
+  });
   const sales = await prisma.sale.findMany({
     where: { companyId: cid, ...cashSessionFilter, ...(cashSessionId ? {} : { createdAt: { gte: from, lte: to } }) },
     include: { items: { include: { service: true, product: true } } }
@@ -235,6 +242,7 @@ async function cashReportSummary(req: Request, res: import("express").Response) 
   return res.json({
     from,
     to,
+    sessions,
     totalsByMethod,
     totalReceived: Object.values(totalsByMethod).reduce((sum, value) => sum + value, 0),
     pendingTotal,
