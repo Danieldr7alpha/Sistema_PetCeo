@@ -16,6 +16,8 @@ const cashSubmenus = [
   { key: "checkout", label: "Ponto de Venda" },
   { key: "checkout:pending", label: "Pedidos Pendentes" },
   { key: "checkout:reports", label: "Relatório" },
+  { key: "checkout:withdrawal", label: "Sangria" },
+  { key: "checkout:supply", label: "Suprimento" },
   { key: "checkout:transfer", label: "Transferência" },
   { key: "checkout:consumption", label: "Consumo" },
   { key: "checkout:close", label: "Fechar Caixa" }

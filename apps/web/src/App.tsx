@@ -1795,11 +1795,13 @@ function CatalogModal({ type, mode, item, adminPassword, productOptions, onClose
   </form></Modal>;
 }
 
-type CashSectionKey = "pos" | "session" | "sales" | "preSales" | "pending" | "movements" | "reports";
+type CashSectionKey = "pos" | "session" | "sales" | "preSales" | "pending" | "movements" | "withdrawal" | "supply" | "reports";
 
 function checkoutSectionFromPage(page: string): CashSectionKey {
   if (page === "checkout:pending") return "pending";
   if (page === "checkout:reports") return "reports";
+  if (page === "checkout:withdrawal") return "withdrawal";
+  if (page === "checkout:supply") return "supply";
   if (page === "checkout:transfer" || page === "checkout:consumption") return "movements";
   if (page === "checkout:close") return "session";
   return "pos";
@@ -1892,7 +1894,7 @@ function Checkout({ draft, chargeSaleId, onClearDraft, session, sectionPage }: {
     {section !== "pos" && <button className="btn btn-secondary mb-4" type="button" onClick={() => setSection("pos")}>Voltar ao Caixa</button>}
 
     {saleLoadError && section === "pos" && <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{saleLoadError}</p>}
-    {["pos", "session", "movements"].includes(section) && !cashStateReady && <div className="panel p-5">
+    {["pos", "session", "movements", "withdrawal", "supply"].includes(section) && !cashStateReady && <div className="panel p-5">
       {(cashCurrentLoading || !cashCurrentError) && <p className="text-sm text-slate-600">Verificando o caixa aberto...</p>}
       {!cashCurrentLoading && cashCurrentError && <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-red-700">{cashCurrentError}</p><button className="btn btn-secondary" type="button" onClick={refreshCash}>Tentar novamente</button></div>}
     </div>}
@@ -1902,6 +1904,8 @@ function Checkout({ draft, chargeSaleId, onClearDraft, session, sectionPage }: {
     {section === "preSales" && <CashPreSales onReceive={(sale) => setSaleModal({ sale })} />}
     {section === "pending" && <CashPendingSales onOpenInPos={openSaleInPos} />}
     {section === "movements" && cashStateReady && <CashMovements cashSession={cashSession} onRefresh={refreshCash} />}
+    {section === "withdrawal" && cashStateReady && <CashMovements key="withdrawal" cashSession={cashSession} onRefresh={refreshCash} fixedType="CASH_OUT" />}
+    {section === "supply" && cashStateReady && <CashMovements key="supply" cashSession={cashSession} onRefresh={refreshCash} fixedType="CASH_IN" />}
     {section === "reports" && <CashReports isAdmin={session.user.role === "ADMIN"} cashSession={cashSession} />}
 
     {saleModal && <SaleReceiveModal sale={saleModal.sale} session={session} cashSession={cashSession} onClose={() => setSaleModal(null)} onSaved={() => { setSaleModal(null); refreshPos(); }} />}
@@ -2860,8 +2864,8 @@ function CashPendingSales({ onOpenInPos }: { onOpenInPos: (sale: Sale) => void }
   </div>;
 }
 
-function CashMovements({ cashSession, onRefresh }: { cashSession: CashSession | null; onRefresh: () => void }) {
-  const [type, setType] = useState<CashMovementType>("CASH_IN");
+function CashMovements({ cashSession, onRefresh, fixedType }: { cashSession: CashSession | null; onRefresh: () => void; fixedType?: CashMovementType }) {
+  const [type, setType] = useState<CashMovementType>(fixedType ?? "CASH_IN");
   const [amountCents, setAmountCents] = useState("");
   const [reason, setReason] = useState("");
   const [notes, setNotes] = useState("");
@@ -2902,7 +2906,7 @@ function CashMovements({ cashSession, onRefresh }: { cashSession: CashSession | 
     }
   }
 
-  if (!cashSession) return <div className="panel grid gap-3 p-4"><h2 className="font-semibold">Movimentações</h2><p className="text-sm text-slate-500">Abra o caixa para registrar suprimentos, sangrias, despesas e ajustes.</p></div>;
+  if (!cashSession) return <div className="panel grid gap-3 p-4"><h2 className="font-semibold">{fixedType ? cashMovementLabels[fixedType] : "Movimentações"}</h2><p className="text-sm text-slate-500">Abra o caixa para registrar esta movimentação.</p></div>;
 
   return <div className="grid gap-4">
     <div className="panel grid gap-2 p-4 md:grid-cols-4">
@@ -2912,9 +2916,9 @@ function CashMovements({ cashSession, onRefresh }: { cashSession: CashSession | 
       <p><b>Dinheiro esperado:</b> {currency(summary?.expectedCash ?? cashSession.openingAmount)}</p>
     </div>
     <div className="panel grid gap-3 p-4">
-      <h2 className="font-semibold">Nova movimentação</h2>
+      <h2 className="font-semibold">{fixedType ? `Registrar ${cashMovementLabels[fixedType].toLowerCase()}` : "Nova movimentação"}</h2>
       <div className="grid gap-3 md:grid-cols-3">
-        <select className="field" value={type} onChange={(event) => setType(event.target.value as CashMovementType)}>{Object.entries(cashMovementLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+        {!fixedType && <select className="field" value={type} onChange={(event) => setType(event.target.value as CashMovementType)}>{Object.entries(cashMovementLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>}
         <input className="field" placeholder="Valor" inputMode="numeric" value={formatCurrencyInput(amountCents)} onChange={(event) => setAmountCents(onlyDigits(event.target.value))} />
         <input className="field" placeholder="Motivo" value={reason} onChange={(event) => setReason(event.target.value)} />
       </div>
@@ -3096,12 +3100,6 @@ function CashPreSales({ onReceive }: { onReceive: (sale: Sale) => void }) {
 function CashSessionPanel({ cashSession, onRefresh }: { cashSession: CashSession | null; onRefresh: () => void }) {
   const [openingCents, setOpeningCents] = useState("0");
   const [notes, setNotes] = useState("");
-  const [movement, setMovement] = useState<"CASH_IN" | "CASH_OUT" | null>(null);
-  const [movementCents, setMovementCents] = useState("");
-  const [movementReason, setMovementReason] = useState("");
-  const [movementNotes, setMovementNotes] = useState("");
-  const [movementPassword, setMovementPassword] = useState("");
-  const [closeOpen, setCloseOpen] = useState(false);
   const [countedCents, setCountedCents] = useState("");
   const [differenceReason, setDifferenceReason] = useState("");
   const [closePassword, setClosePassword] = useState("");
@@ -3121,24 +3119,12 @@ function CashSessionPanel({ cashSession, onRefresh }: { cashSession: CashSession
     }
   }
 
-  async function saveMovement() {
-    if (!cashSession || !movement) return;
-    setMessage("");
-    try {
-      await api(`/cash/${cashSession.id}/movements`, { method: "POST", body: JSON.stringify({ type: movement, amount: decimalFromCents(movementCents), reason: movementReason, notes: movementNotes, adminPassword: movement === "CASH_OUT" ? movementPassword : undefined }) });
-      setMovement(null); setMovementCents(""); setMovementReason(""); setMovementNotes(""); setMovementPassword("");
-      refreshSummary(); onRefresh();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Falha ao registrar movimentação.");
-    }
-  }
-
   async function closeCash() {
     if (!cashSession) return;
     setMessage("");
     try {
       await api(`/cash/${cashSession.id}/close`, { method: "POST", body: JSON.stringify({ countedCashAmount: countedCash, differenceReason, adminPassword: closePassword }) });
-      setCloseOpen(false); onRefresh();
+      onRefresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Falha ao fechar caixa.");
     }
@@ -3147,10 +3133,8 @@ function CashSessionPanel({ cashSession, onRefresh }: { cashSession: CashSession
   if (!cashSession) return <div className="panel grid gap-3 p-4"><h2 className="font-semibold">Abrir Caixa</h2><label className="text-sm font-medium">Valor inicial em dinheiro<input className="field mt-1" inputMode="numeric" value={formatCurrencyInput(openingCents)} onChange={(event) => setOpeningCents(onlyDigits(event.target.value))} /></label><label className="text-sm font-medium">Observação<textarea className="field mt-1" value={notes} onChange={(event) => setNotes(event.target.value)} /></label>{message && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{message}</p>}<button className="btn btn-primary justify-self-start" onClick={openCash}>Abrir Caixa</button></div>;
 
   return <div className="grid gap-4">
-    <div className="panel grid gap-2 p-4 md:grid-cols-3"><p><b>Sessão:</b> {cashSessionCode(cashSession)}</p><p><b>Aberto desde:</b> {dateTimeBR(cashSession.openedAt)}</p><p><b>Operador:</b> {cashSession.openedByName ?? "-"}</p><p><b>Valor inicial:</b> {currency(cashSession.openingAmount)}</p><p><b>Sangrias:</b> {currency(summary?.cashOut ?? 0)}</p><p><b>Suprimentos:</b> {currency(summary?.cashIn ?? 0)}</p></div>
-    <div className="flex flex-wrap gap-2"><button className="btn btn-secondary" onClick={() => setMovement("CASH_OUT")}>Sangria</button><button className="btn btn-secondary" onClick={() => setMovement("CASH_IN")}>Suprimento</button><button className="btn btn-primary" onClick={() => setCloseOpen(true)}>Fechar Caixa</button></div>
-    {movement && <div className="panel grid gap-3 p-4"><h3 className="font-semibold">{movement === "CASH_OUT" ? "Sangria" : "Suprimento"}</h3><input className="field" placeholder="Valor" value={formatCurrencyInput(movementCents)} onChange={(event) => setMovementCents(onlyDigits(event.target.value))} /><input className="field" placeholder="Motivo" value={movementReason} onChange={(event) => setMovementReason(event.target.value)} /><textarea className="field" placeholder="Observação" value={movementNotes} onChange={(event) => setMovementNotes(event.target.value)} />{movement === "CASH_OUT" && <input className="field" type="password" placeholder="Senha do administrador" value={movementPassword} onChange={(event) => setMovementPassword(event.target.value)} />}<button className="btn btn-primary justify-self-start" onClick={saveMovement}>Registrar</button></div>}
-    {closeOpen && <div className="panel grid gap-3 p-4"><h3 className="font-semibold">Fechamento de Caixa</h3><div className="grid gap-2 text-sm md:grid-cols-3">{Object.entries(paymentMethodLabels).map(([method, label]) => <p key={method}><b>{label}:</b> {currency(summary?.totalsByMethod?.[method as PaymentMethod] ?? 0)}</p>)}<p><b>Pendentes:</b> {currency(summary?.pendingTotal ?? 0)}</p><p><b>Cancelados:</b> {currency(summary?.cancelledTotal ?? 0)}</p><p><b>Total recebido:</b> {currency(summary?.totalReceived ?? 0)}</p><p><b>Dinheiro esperado:</b> {currency(expectedCash)}</p></div><input className="field" placeholder="Valor contado em dinheiro" value={formatCurrencyInput(countedCents)} onChange={(event) => setCountedCents(onlyDigits(event.target.value))} /><p className="text-sm"><b>Diferença:</b> {currency(difference)} {difference > 0 ? "(sobra)" : difference < 0 ? "(falta)" : "(sem diferença)"}</p>{difference !== 0 && <textarea className="field" placeholder="Motivo obrigatório da diferença" value={differenceReason} onChange={(event) => setDifferenceReason(event.target.value)} />}<input className="field" type="password" placeholder="Senha do administrador" value={closePassword} onChange={(event) => setClosePassword(event.target.value)} /><button className="btn btn-primary justify-self-start" onClick={closeCash}>Fechar Caixa</button></div>}
+    <div className="panel grid gap-2 p-4 md:grid-cols-4"><p><b>Sessão:</b> {cashSessionCode(cashSession)}</p><p><b>Aberto desde:</b> {dateTimeBR(cashSession.openedAt)}</p><p><b>Operador:</b> {cashSession.openedByName ?? "-"}</p><p><b>Valor atual em dinheiro:</b> {currency(expectedCash)}</p></div>
+    <div className="panel grid gap-3 p-4"><h3 className="font-semibold">Fechamento de Caixa</h3><div className="grid gap-2 text-sm md:grid-cols-3">{Object.entries(paymentMethodLabels).map(([method, label]) => <p key={method}><b>{label}:</b> {currency(summary?.totalsByMethod?.[method as PaymentMethod] ?? 0)}</p>)}<p><b>Pendentes:</b> {currency(summary?.pendingTotal ?? 0)}</p><p><b>Cancelados:</b> {currency(summary?.cancelledTotal ?? 0)}</p><p><b>Total recebido:</b> {currency(summary?.totalReceived ?? 0)}</p><p><b>Dinheiro atual no caixa:</b> {currency(expectedCash)}</p></div><label className="text-sm font-medium">Valor contado em dinheiro<input className="field mt-1" inputMode="numeric" value={formatCurrencyInput(countedCents)} onChange={(event) => setCountedCents(onlyDigits(event.target.value))} /></label><p className="text-sm"><b>Diferença:</b> {currency(difference)} {difference > 0 ? "(sobra)" : difference < 0 ? "(falta)" : "(sem diferença)"}</p>{difference !== 0 && <textarea className="field" placeholder="Motivo obrigatório da diferença" value={differenceReason} onChange={(event) => setDifferenceReason(event.target.value)} />}<input className="field" type="password" placeholder="Senha do administrador" value={closePassword} onChange={(event) => setClosePassword(event.target.value)} /><button className="btn btn-primary justify-self-start" onClick={closeCash}>Fechar Caixa</button></div>
     {message && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{message}</p>}
   </div>;
 }
