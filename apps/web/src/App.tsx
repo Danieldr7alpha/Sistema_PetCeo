@@ -3199,10 +3199,20 @@ function CashReports({ isAdmin }: { isAdmin: boolean }) {
   const range = cashPeriodRange(period, customFrom, customTo);
   const { data } = useData<CashReport>(isAdmin ? `/cash/reports/summary?from=${range.from}&to=${range.to}` : "", [isAdmin, period, customFrom, customTo]);
   const paymentDetails = data?.paymentDetails ?? [];
+  const summaryCards = [
+    { label: "PIX", value: data?.totalsByMethod?.PIX ?? 0 },
+    { label: "Dinheiro", value: data?.totalsByMethod?.CASH ?? 0 },
+    { label: "Cartão Débito", value: data?.totalsByMethod?.DEBIT ?? 0 },
+    { label: "Cartão Crédito", value: data?.totalsByMethod?.CREDIT ?? 0 },
+    { label: "Transferência", value: data?.totalsByMethod?.TRANSFER ?? 0 },
+    { label: "Cancelados", value: data?.cancelledTotal ?? 0 },
+    { label: "Desconto", value: data?.discountsTotal ?? 0 },
+    { label: "Total", value: data?.totalReceived ?? 0 }
+  ];
   if (!isAdmin) return <div className="panel p-4 text-sm text-slate-600">Relatórios são visíveis apenas para administradores.</div>;
   return <div className="grid gap-4">
     <div className="panel grid gap-3 p-3 md:grid-cols-3"><select className="field" value={period} onChange={(event) => setPeriod(event.target.value)}><option value="today">Hoje</option><option value="yesterday">Ontem</option><option value="week">Semana</option><option value="month">Mês</option><option value="custom">Personalizado</option></select>{period === "custom" && <><input className="field" type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /><input className="field" type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></>}</div>
-    <div className="grid gap-3 md:grid-cols-3">{Object.entries(paymentMethodLabels).map(([method, label]) => <div className="panel p-4" key={method}><p className="text-sm text-slate-500">{label}</p><b className="text-xl">{currency(data?.totalsByMethod?.[method as PaymentMethod] ?? 0)}</b></div>)}<div className="panel p-4"><p className="text-sm text-slate-500">Total recebido</p><b className="text-xl">{currency(data?.totalReceived ?? 0)}</b></div><div className="panel p-4"><p className="text-sm text-slate-500">Pendentes</p><b className="text-xl">{currency(data?.pendingTotal ?? 0)}</b></div><div className="panel p-4"><p className="text-sm text-slate-500">Cancelados</p><b className="text-xl">{currency(data?.cancelledTotal ?? 0)}</b></div><div className="panel p-4"><p className="text-sm text-slate-500">Descontos</p><b className="text-xl">{currency(data?.discountsTotal ?? 0)}</b></div></div>
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">{summaryCards.map((card) => <div className="panel min-w-0 p-4" key={card.label}><p className="text-sm font-medium text-slate-500">{card.label}</p><b className="mt-1 block whitespace-nowrap text-lg">{currency(card.value)}</b></div>)}</div>
     <div className="grid gap-4 lg:grid-cols-2">{(["DEBIT", "CREDIT", "PIX", "CASH"] as PaymentMethod[]).map((method) => <PaymentReportGroup key={method} method={method} payments={paymentDetails.filter((payment) => payment.method === method)} />)}</div>
     <div className="grid gap-4 lg:grid-cols-2"><ReportList title="Vendas por operador" items={data?.byOperator ?? []} /><ReportList title="Vendas por serviço" items={data?.byService ?? []} /><ReportList title="Vendas por produto" items={data?.byProduct ?? []} /><ReportList title="Horários das vendas" items={(data?.byHour ?? []).map((item) => ({ name: `${item.hour}h`, total: item.total }))} /></div>
   </div>;
