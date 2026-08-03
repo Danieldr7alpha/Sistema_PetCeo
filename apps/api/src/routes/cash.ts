@@ -186,8 +186,7 @@ async function cashReportSummary(req: Request, res: import("express").Response) 
   const cid = companyId(req);
   const { from, to } = periodFromQuery(req);
   const cashSessionId = req.query.cashSessionId ? String(req.query.cashSessionId) : undefined;
-  const excludeCashSessionId = req.query.excludeCashSessionId ? String(req.query.excludeCashSessionId) : undefined;
-  const cashSessionFilter = cashSessionId ? { cashSessionId } : excludeCashSessionId ? { cashSessionId: { not: excludeCashSessionId } } : {};
+  const cashSessionFilter = cashSessionId ? { cashSessionId } : {};
   const sales = await prisma.sale.findMany({
     where: { companyId: cid, ...cashSessionFilter, ...(cashSessionId ? {} : { createdAt: { gte: from, lte: to } }) },
     include: { items: { include: { service: true, product: true } } }

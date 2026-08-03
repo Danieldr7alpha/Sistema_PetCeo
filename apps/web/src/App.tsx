@@ -1902,7 +1902,7 @@ function Checkout({ draft, chargeSaleId, onClearDraft, session, sectionPage }: {
     {section === "preSales" && <CashPreSales onReceive={(sale) => setSaleModal({ sale })} />}
     {section === "pending" && <CashPendingSales onOpenInPos={openSaleInPos} />}
     {section === "movements" && cashStateReady && <CashMovements cashSession={cashSession} onRefresh={refreshCash} />}
-    {section === "reports" && <CashReports isAdmin={session.user.role === "ADMIN"} cashSession={cashSession} />}
+    {section === "reports" && <CashReports isAdmin={session.user.role === "ADMIN"} />}
 
     {saleModal && <SaleReceiveModal sale={saleModal.sale} session={session} cashSession={cashSession} onClose={() => setSaleModal(null)} onSaved={() => { setSaleModal(null); refreshPos(); }} />}
   </Page>;
@@ -3197,15 +3197,13 @@ function CashSalesHistory() {
   </div>;
 }
 
-function CashReports({ isAdmin, cashSession }: { isAdmin: boolean; cashSession: CashSession | null }) {
+function CashReports({ isAdmin }: { isAdmin: boolean }) {
   const [period, setPeriod] = useState("today");
   const [customFrom, setCustomFrom] = useState(localDateInput());
   const [customTo, setCustomTo] = useState(localDateInput());
   const range = cashPeriodRange(period, customFrom, customTo);
-  const reportParams = period === "today" && cashSession
-    ? `cashSessionId=${encodeURIComponent(cashSession.id)}`
-    : `from=${range.from}&to=${range.to}${cashSession ? `&excludeCashSessionId=${encodeURIComponent(cashSession.id)}` : ""}`;
-  const { data, loading, refreshing } = useData<CashReport>(isAdmin ? `/cash/reports/summary?${reportParams}` : "", [isAdmin, period, customFrom, customTo, cashSession?.id]);
+  const reportParams = `from=${range.from}&to=${range.to}`;
+  const { data, loading, refreshing } = useData<CashReport>(isAdmin ? `/cash/reports/summary?${reportParams}` : "", [isAdmin, period, customFrom, customTo]);
   const reportData = loading || refreshing ? null : data;
   const paymentDetails = reportData?.paymentDetails ?? [];
   const paymentGroups = [...paymentDetails.reduce((groups, payment) => {
