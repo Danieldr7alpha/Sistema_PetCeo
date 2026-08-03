@@ -56,7 +56,7 @@ type PosPaymentForm = PaymentForm & { method: PosPaymentMethod; cashReceivedCent
 type CashMovementType = "CASH_IN" | "CASH_OUT" | "EXPENSE" | "TRANSFER_IN" | "TRANSFER_OUT" | "ADJUSTMENT";
 type CashMovement = { id: string; internalCode?: number; type: CashMovementType; amount: number | string; reason: string; notes?: string; originAccount?: string | null; destinationAccount?: string | null; transferId?: string | null; operatorName?: string; createdAt: string };
 type CashSession = { id: string; internalCode?: number; status: "OPEN" | "CLOSED"; openedByName?: string; closedByName?: string; openingAmount: number | string; closingCashAmount?: number | string | null; expectedCashAmount?: number | string | null; difference?: number | string | null; differenceReason?: string | null; notes?: string | null; openedAt: string; closedAt?: string | null; movements?: CashMovement[] };
-type CashCurrent = { session: CashSession | null };
+type CashCurrent = { session: CashSession | null; hasPreviousSession: boolean; openingBalance: number };
 type CashSummary = { session: CashSession; sales: Sale[]; totalsByMethod: Record<PaymentMethod, number>; pendingTotal: number; cancelledTotal: number; discountsTotal: number; cashIn: number; cashOut: number; totalReceived: number; expectedCash: number };
 type CashPaymentDetail = { id: string; method: PaymentMethod; amount: number; cardBrand?: string | null; cardNsu?: string | null; installments?: number | null; pixReference?: string | null; cashReceived?: number | null; changeAmount?: number | null; paidAt: string; saleCode?: number | null; receiptCode?: number | null; customerName: string; petName?: string | null; operatorName: string };
 type CashReport = { sessions: CashSession[]; totalsByMethod: Record<PaymentMethod, number>; totalReceived: number; pendingTotal: number; cancelledTotal: number; discountsTotal: number; paymentDetails: CashPaymentDetail[]; byOperator: { name: string; total: number }[]; byService: { name: string; total: number }[]; byProduct: { name: string; total: number }[]; byHour: { hour: string; total: number }[] };
@@ -1938,6 +1938,8 @@ function CashPointOfSale({ cashSession, query, setQuery, waitingSales, pendingSa
   const { data: services } = useData<Service[]>("/catalog/services");
   const { data: products } = useData<Product[]>("/catalog/products");
   const { data: summary } = useData<CashSummary>(cashSession ? `/cash/${cashSession.id}/summary` : "", [cashSession?.id]);
+  const { data: openingState } = useData<CashCurrent>(cashSession ? "" : "/cash/current", [cashSession?.id]);
+  useEffect(() => { if (openingState?.hasPreviousSession) setOpeningCents(String(Math.round(Number(openingState.openingBalance) * 100))); }, [openingState?.hasPreviousSession, openingState?.openingBalance]);
 
   async function openCash() {
     setOpenError("");
@@ -1971,7 +1973,8 @@ function CashPointOfSale({ cashSession, query, setQuery, waitingSales, pendingSa
     <div><h2 className="text-xl font-semibold">Selecionar Caixa</h2><p className="text-sm text-slate-500">Nenhum caixa está aberto para operar o PDV. Escolha o caixa e informe o valor inicial.</p></div>
     <div className="grid gap-3">
       <label className="text-sm font-medium">Caixa<select className="field mt-1" value={cashRegister} onChange={(event) => setCashRegister(event.target.value)}><option>Caixa 01</option><option>Caixa 02</option></select></label>
-      <label className="text-sm font-medium">Valor inicial<input className="field mt-1" inputMode="numeric" value={formatCurrencyInput(openingCents)} onChange={(event) => setOpeningCents(onlyDigits(event.target.value))} /></label>
+      <label className="text-sm font-medium">Valor de abertura<input className="field mt-1" disabled={openingState?.hasPreviousSession} inputMode="numeric" value={formatCurrencyInput(openingCents)} onChange={(event) => setOpeningCents(onlyDigits(event.target.value))} /></label>
+      {openingState?.hasPreviousSession && <p className="text-xs text-slate-500">Valor herdado automaticamente do último fechamento.</p>}
       {openError && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{openError}</p>}
       <button className="btn btn-primary" type="button" onClick={openCash}>Abrir e iniciar PDV</button>
     </div>
@@ -2044,6 +2047,8 @@ function CashPointOfSaleLayout({ cashSession, query, setQuery, loadedSale, waiti
   const [orderSearchOpen, setOrderSearchOpen] = useState(false);
   const [orderSearchQuery, setOrderSearchQuery] = useState("");
   const [orderSearchPage, setOrderSearchPage] = useState(1);
+  const { data: openingState } = useData<CashCurrent>(cashSession ? "" : "/cash/current", [cashSession?.id]);
+  useEffect(() => { if (openingState?.hasPreviousSession) setOpeningCents(String(Math.round(Number(openingState.openingBalance) * 100))); }, [openingState?.hasPreviousSession, openingState?.openingBalance]);
   const [orderSearchResult, setOrderSearchResult] = useState<ReceivableSalesPage | null>(null);
   const [orderListLoading, setOrderListLoading] = useState(false);
   const [expandedOrderDetails, setExpandedOrderDetails] = useState<Set<string>>(() => new Set());
@@ -2335,7 +2340,8 @@ function CashPointOfSaleLayout({ cashSession, query, setQuery, loadedSale, waiti
     <div><h2 className="text-xl font-semibold">Selecionar Caixa</h2><p className="text-sm text-slate-500">Nenhum caixa está aberto. Escolha o caixa e informe o valor inicial.</p></div>
     <div className="grid gap-3">
       <label className="text-sm font-medium">Caixa<select className="field mt-1" value={cashRegister} onChange={(event) => setCashRegister(event.target.value)}><option>CX - 101</option><option>CX - 102</option></select></label>
-      <label className="text-sm font-medium">Valor inicial<input className="field mt-1" inputMode="numeric" value={formatCurrencyInput(openingCents)} onChange={(event) => setOpeningCents(onlyDigits(event.target.value))} /></label>
+      <label className="text-sm font-medium">Valor de abertura<input className="field mt-1" disabled={openingState?.hasPreviousSession} inputMode="numeric" value={formatCurrencyInput(openingCents)} onChange={(event) => setOpeningCents(onlyDigits(event.target.value))} /></label>
+      {openingState?.hasPreviousSession && <p className="text-xs text-slate-500">Valor herdado automaticamente do último fechamento.</p>}
       {openError && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{openError}</p>}
       <button className="btn btn-primary" type="button" onClick={openCash}>Abrir caixa</button>
     </div>
@@ -3116,6 +3122,8 @@ function CashSessionPanel({ cashSession, onRefresh, onClosed }: { cashSession: C
   const [closePassword, setClosePassword] = useState("");
   const [message, setMessage] = useState("");
   const { data: summary, refresh: refreshSummary } = useData<CashSummary>(cashSession ? `/cash/${cashSession.id}/summary` : "", [cashSession?.id]);
+  const { data: openingState } = useData<CashCurrent>(cashSession ? "" : "/cash/current", [cashSession?.id]);
+  useEffect(() => { if (openingState?.hasPreviousSession) setOpeningCents(String(Math.round(Number(openingState.openingBalance) * 100))); }, [openingState?.hasPreviousSession, openingState?.openingBalance]);
   const expectedCash = summary?.expectedCash ?? 0;
   const countedCash = decimalFromCents(countedCents);
   const difference = Number((countedCash - expectedCash).toFixed(2));
@@ -3142,7 +3150,7 @@ function CashSessionPanel({ cashSession, onRefresh, onClosed }: { cashSession: C
     }
   }
 
-  if (!cashSession) return <div className="panel grid gap-3 p-4"><h2 className="font-semibold">Abrir Caixa</h2><label className="text-sm font-medium">Valor inicial em dinheiro<input className="field mt-1" inputMode="numeric" value={formatCurrencyInput(openingCents)} onChange={(event) => setOpeningCents(onlyDigits(event.target.value))} /></label><label className="text-sm font-medium">Observação<textarea className="field mt-1" value={notes} onChange={(event) => setNotes(event.target.value)} /></label>{message && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{message}</p>}<button className="btn btn-primary justify-self-start" onClick={openCash}>Abrir Caixa</button></div>;
+  if (!cashSession) return <div className="panel grid gap-3 p-4"><h2 className="font-semibold">Abrir Caixa</h2><label className="text-sm font-medium">Valor de abertura em dinheiro<input className="field mt-1" disabled={openingState?.hasPreviousSession} inputMode="numeric" value={formatCurrencyInput(openingCents)} onChange={(event) => setOpeningCents(onlyDigits(event.target.value))} /></label>{openingState?.hasPreviousSession && <p className="text-sm text-slate-500">Este valor veio do dinheiro contado no último fechamento e não pode ser alterado.</p>}<label className="text-sm font-medium">Observação<textarea className="field mt-1" value={notes} onChange={(event) => setNotes(event.target.value)} /></label>{message && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{message}</p>}<button className="btn btn-primary justify-self-start" onClick={openCash}>Abrir Caixa</button></div>;
 
   return <div className="grid gap-4">
     <div className="panel grid gap-2 p-4 md:grid-cols-4"><p><b>Sessão:</b> {cashSessionCode(cashSession)}</p><p><b>Aberto desde:</b> {dateTimeBR(cashSession.openedAt)}</p><p><b>Operador:</b> {cashSession.openedByName ?? "-"}</p><p><b>Valor atual em dinheiro:</b> {currency(expectedCash)}</p></div>

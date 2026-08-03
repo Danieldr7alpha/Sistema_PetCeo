@@ -276,7 +276,8 @@ async function cashReportSummary(req: Request, res: import("express").Response) 
 cashRouter.get("/current", async (req, res) => {
   const cid = companyId(req);
   const session = await openCashSession(cid);
-  res.json({ session });
+  const previous = await prisma.cashSession.findFirst({ where: { companyId: cid, status: "CLOSED" }, orderBy: { closedAt: "desc" } });
+  res.json({ session, hasPreviousSession: Boolean(previous), openingBalance: previous ? Number(previous.closingCashAmount ?? 0) : 0 });
 });
 
 cashRouter.post("/open", async (req, res) => {
@@ -284,12 +285,14 @@ cashRouter.post("/open", async (req, res) => {
   const body = z.object({ openingAmount: z.coerce.number().nonnegative().default(0), notes: z.string().optional() }).parse(req.body);
   const current = await openCashSession(cid);
   if (current) return res.status(409).json({ message: "Já existe um caixa aberto." });
+  const previous = await prisma.cashSession.findFirst({ where: { companyId: cid, status: "CLOSED" }, orderBy: { closedAt: "desc" } });
+  const openingAmount = previous ? Number(previous.closingCashAmount ?? 0) : body.openingAmount;
   const operator = await operatorData(req);
   const session = await prisma.cashSession.create({
     data: {
       companyId: cid,
       internalCode: await nextCashSessionCode(cid),
-      openingAmount: body.openingAmount,
+      openingAmount,
       notes: body.notes,
       openedById: operator.operatorId,
       openedByName: operator.operatorName
