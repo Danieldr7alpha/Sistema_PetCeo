@@ -83,7 +83,7 @@ financialRouter.use(requireAdmin);
 
 financialRouter.get("/accounts", async (req, res) => {
   const cid = companyId(req);
-  const accounts = await prisma.financialAccount.findMany({ where: { companyId: cid }, orderBy: [{ active: "desc" }, { name: "asc" }] });
+  const accounts = await prisma.financialAccount.findMany({ where: { companyId: cid, active: true }, orderBy: { name: "asc" } });
   const legacyTotals = await prisma.salePayment.groupBy({
     by: ["destinationAccountId"],
     where: { companyId: cid, destinationAccountId: { not: null }, expectedSettlementDate: { lte: new Date() }, settlementInstallments: { none: {} } },
@@ -141,6 +141,18 @@ financialRouter.patch("/accounts/:id", async (req, res) => {
     });
   });
   res.json(account);
+});
+
+financialRouter.delete("/accounts/:id", async (req, res) => {
+  const cid = companyId(req);
+  const existing = await prisma.financialAccount.findFirst({ where: { id: req.params.id, companyId: cid } });
+  if (!existing) return res.status(404).json({ message: "Banco não encontrado." });
+  if (existing.type === "CASH_DRAWER") return res.status(400).json({ message: "O Caixa físico é padrão do sistema e não pode ser excluído." });
+  await prisma.$transaction([
+    prisma.financialPaymentMethod.updateMany({ where: { companyId: cid, destinationAccountId: existing.id }, data: { active: false } }),
+    prisma.financialAccount.update({ where: { id: existing.id }, data: { active: false, isPrimary: false, updatedById: req.user?.userId } })
+  ]);
+  return res.json({ deleted: true, historyPreserved: true });
 });
 
 financialRouter.get("/payment-methods", async (req, res) => {
