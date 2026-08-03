@@ -71,7 +71,7 @@ type ReusableKind = "product-category" | "product-brand" | "supplier" | "service
 type ReusableEditTarget = { kind: ReusableKind; label: string; option: ReusableOption };
 type ConnectionState = "UNKNOWN" | "CHECKING" | "ONLINE" | "OFFLINE" | "SYNCING";
 type FinancialAccount = { id: string; name: string; type: "CASH_DRAWER" | "CHECKING_ACCOUNT" | "SAVINGS_ACCOUNT" | "DIGITAL_ACCOUNT" | "PAYMENT_WALLET" | "OTHER"; institutionName?: string | null; openingBalance: number | string; openingBalanceDate: string; calculatedBalance?: number; isPrimary: boolean; active: boolean; notes?: string | null };
-type FinancialFeeRule = { id: string; installments?: number | null; feePercentage: number | string; fixedFee: number | string; settlementDays: number; effectiveFrom: string; effectiveUntil?: string | null; active: boolean };
+type FinancialFeeRule = { id: string; installments?: number | null; feePercentage: number | string; fixedFee: number | string; allowsAnticipation: boolean; anticipationFeePercentage: number | string; settlementDays: number; effectiveFrom: string; effectiveUntil?: string | null; active: boolean };
 type FinancialPaymentMethod = { id: string; name: string; type: "CASH" | "PIX" | "DEBIT_CARD" | "CREDIT_CARD" | "BANK_TRANSFER" | "OTHER"; institutionName?: string | null; destinationAccountId: string; destinationAccount: FinancialAccount; defaultFeePercentage: number | string; fixedFee: number | string; allowsAnticipation: boolean; anticipationFeePercentage: number | string; settlementDays: number; settlementDayType: "CALENDAR" | "BUSINESS"; maxInstallments: number; requiresNsu: boolean; requiresReceiptCode: boolean; active: boolean; brands: { id: string; brandName: string; active: boolean }[]; feeRules: FinancialFeeRule[] };
 
 const genderLabels: Record<string, string> = { MALE: "Masculino", FEMALE: "Feminino", OTHER: "Outro", UNINFORMED: "Prefiro não informar" };
@@ -2624,6 +2624,12 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
     }));
   }
 
+  function anticipationConfig(row: PosPaymentForm) {
+    const method = financialMethods?.find((item) => item.id === row.financialPaymentMethodId);
+    const rule = method?.feeRules?.find((item) => item.installments === Number(row.installments || 1));
+    return { allowed: rule?.allowsAnticipation ?? method?.allowsAnticipation ?? false, fee: Number(rule?.anticipationFeePercentage ?? method?.anticipationFeePercentage ?? 0) };
+  }
+
   function removeRow(index: number) {
     if (rows.length === 1) return;
     setRows(rows.filter((_, rowIndex) => rowIndex !== index));
@@ -2733,7 +2739,7 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
               {(row.method === "DEBIT" || row.method === "CREDIT") && <div className="grid gap-2 md:grid-cols-3"><select className="field" value={row.cardBrand} onChange={(event) => updateRow(index, { cardBrand: event.target.value })}><option value="">Bandeira</option>{(financialMethods?.find((method) => method.id === row.financialPaymentMethodId)?.brands.map((brand) => brand.brandName) ?? cardBrands).map((brand) => <option key={brand} value={brand}>{brand}</option>)}</select>{row.method === "CREDIT" && <select className="field" value={row.installments} onChange={(event) => updateRow(index, { installments: event.target.value })}>{Array.from({ length: financialMethods?.find((method) => method.id === row.financialPaymentMethodId)?.maxInstallments ?? 12 }, (_, optionIndex) => optionIndex + 1).map((installment) => <option key={installment} value={installment}>{installment}x</option>)}</select>}<input className="field" placeholder="NSU" value={row.cardNsu} onChange={(event) => updateRow(index, { cardNsu: event.target.value })} /></div>}
               <button className="btn btn-secondary" type="button" disabled={rows.length === 1} onClick={() => removeRow(index)}><Trash2 size={16} /></button>
             </div>
-            {financialMethods?.find((method) => method.id === row.financialPaymentMethodId)?.allowsAnticipation && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(row.anticipate)} onChange={(event) => updateRow(index, { anticipate: event.target.checked })} />Antecipar recebimento — taxa de {Number(financialMethods.find((method) => method.id === row.financialPaymentMethodId)?.anticipationFeePercentage ?? 0).toLocaleString("pt-BR")}%</label>}
+            {anticipationConfig(row).allowed && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(row.anticipate)} onChange={(event) => updateRow(index, { anticipate: event.target.checked })} />Antecipar recebimento — taxa de {anticipationConfig(row).fee.toLocaleString("pt-BR")}%</label>}
             {errors[`amount-${index}`] && <p className="text-sm text-red-700">{errors[`amount-${index}`]}</p>}
             {errors[`method-${index}`] && <p className="text-sm text-red-700">{errors[`method-${index}`]}</p>}
             {errors[`cash-${index}`] && <p className="text-sm text-red-700">{errors[`cash-${index}`]}</p>}
@@ -3631,6 +3637,51 @@ function FinancialAccountModal({ onClose, onSaved }: { onClose: () => void; onSa
 }
 
 function FinancialMethodModal({ accounts, onClose, onSaved }: { accounts: FinancialAccount[]; onClose: () => void; onSaved: () => void }) {
+  type RateRow = { fee: string; anticipates: boolean; anticipationFee: string };
+  const [form, setForm] = useState({ name: "", type: "PIX", institutionName: "", destinationAccountId: accounts[0]?.id ?? "", maxInstallments: 1, brands: "" });
+  const [rates, setRates] = useState<RateRow[]>([{ fee: "", anticipates: false, anticipationFee: "" }]);
+  const [error, setError] = useState("");
+  const isCredit = form.type === "CREDIT_CARD";
+  const isCard = form.type === "CREDIT_CARD" || form.type === "DEBIT_CARD";
+  function setInstallmentCount(value: number) {
+    const count = Math.max(1, Math.min(12, value));
+    setForm({ ...form, maxInstallments: count });
+    setRates((current) => Array.from({ length: count }, (_, index) => current[index] ?? { fee: "", anticipates: false, anticipationFee: "" }));
+  }
+  function updateRate(index: number, patch: Partial<RateRow>) { setRates((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row)); }
+  async function submit(event: React.FormEvent) {
+    event.preventDefault(); setError("");
+    if (!form.name.trim()) return setError("Informe o nome da forma de pagamento.");
+    if (!form.destinationAccountId) return setError("Selecione o banco ou a conta que receberá o dinheiro.");
+    if (isCard && rates.some((row) => row.fee.trim() === "")) return setError("Informe a taxa de todas as parcelas.");
+    if (rates.some((row) => row.anticipates && row.anticipationFee.trim() === "")) return setError("Informe a taxa de antecipação nas parcelas marcadas.");
+    try {
+      const created = await api<FinancialPaymentMethod>("/financial/payment-methods", { method: "POST", body: JSON.stringify({ name: form.name, type: form.type, institutionName: form.institutionName, destinationAccountId: form.destinationAccountId, defaultFeePercentage: Number((rates[0]?.fee || "0").replace(",", ".")), fixedFee: 0, allowsAnticipation: rates.some((row) => row.anticipates), anticipationFeePercentage: Number((rates.find((row) => row.anticipates)?.anticipationFee || "0").replace(",", ".")), settlementDays: 0, settlementDayType: "CALENDAR", maxInstallments: isCredit ? form.maxInstallments : 1, requiresNsu: isCard, requiresReceiptCode: false, active: true, brands: isCard ? form.brands.split(",").map((item) => item.trim()).filter(Boolean) : [] }) });
+      await Promise.all(rates.map((row, index) => api(`/financial/payment-methods/${created.id}/fee-rules`, { method: "POST", body: JSON.stringify({ installments: isCredit ? index + 1 : undefined, feePercentage: Number((row.fee || "0").replace(",", ".")), fixedFee: 0, allowsAnticipation: row.anticipates, anticipationFeePercentage: row.anticipates ? Number((row.anticipationFee || "0").replace(",", ".")) : 0, settlementDays: 0, settlementDayType: "CALENDAR", effectiveFrom: localDateInput(), active: true }) })));
+      onSaved();
+    } catch (e) { setError(e instanceof Error ? e.message : "Não foi possível salvar a forma de pagamento."); }
+  }
+  return <Modal title="Nova forma de pagamento" onClose={onClose}><form className="grid gap-5" onSubmit={submit}>
+    <div className="grid gap-4 sm:grid-cols-2">
+      <label className="text-sm font-semibold">Nome da forma de pagamento<input className="field mt-1" placeholder="Ex.: Visa Crédito, PIX Santander" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /><small className="mt-1 block font-normal text-slate-500">Este nome aparecerá para o funcionário no Caixa.</small></label>
+      <label className="text-sm font-semibold">Tipo de pagamento<select className="field mt-1" value={form.type} onChange={(e) => { const type = e.target.value; setForm({ ...form, type, maxInstallments: 1 }); setRates([{ fee: "", anticipates: false, anticipationFee: "" }]); }}><option value="PIX">PIX</option><option value="DEBIT_CARD">Cartão de débito</option><option value="CREDIT_CARD">Cartão de crédito</option></select></label>
+      <label className="text-sm font-semibold">Instituição ou maquininha<input className="field mt-1" placeholder="Ex.: Getnet, InfinitePay, Cielo" value={form.institutionName} onChange={(e) => setForm({ ...form, institutionName: e.target.value })} /></label>
+      <label className="text-sm font-semibold">Banco/conta que receberá o valor<select className="field mt-1" value={form.destinationAccountId} onChange={(e) => setForm({ ...form, destinationAccountId: e.target.value })}>{accounts.map((account) => <option value={account.id} key={account.id}>{account.name}</option>)}</select><small className="mt-1 block font-normal text-slate-500">O sistema registrará nessa conta o valor líquido, depois das taxas.</small></label>
+      {isCredit && <label className="text-sm font-semibold">Quantidade máxima de parcelas<select className="field mt-1" value={form.maxInstallments} onChange={(e) => setInstallmentCount(Number(e.target.value))}>{Array.from({ length: 12 }, (_, index) => index + 1).map((count) => <option value={count} key={count}>{count}x</option>)}</select></label>}
+      {isCard && <label className="text-sm font-semibold">Bandeiras aceitas<input className="field mt-1" placeholder="Ex.: Visa, Mastercard, Elo" value={form.brands} onChange={(e) => setForm({ ...form, brands: e.target.value })} /></label>}
+    </div>
+    <div><h3 className="font-semibold">Taxas {isCredit ? "por parcela" : "do pagamento à vista"}</h3><p className="text-sm text-slate-500">A taxa normal será sempre descontada. A antecipação só será aplicada quando estiver marcada.</p></div>
+    <div className="grid gap-3">{rates.map((row, index) => <div className="grid items-end gap-3 rounded-lg border border-slate-200 p-3 sm:grid-cols-[80px_1fr_180px_1fr]" key={index}>
+      <div className="rounded-md bg-slate-100 px-3 py-2 text-center font-semibold">{isCredit ? `${index + 1}x` : "À vista"}</div>
+      <label className="text-sm font-semibold">Taxa normal (%)<input className="field mt-1" inputMode="decimal" placeholder={form.type === "PIX" ? "Opcional — ex.: 0,99" : "Obrigatória — ex.: 3,16"} value={row.fee} onChange={(e) => updateRate(index, { fee: e.target.value })} /></label>
+      <label className="flex h-10 items-center gap-2 text-sm"><input type="checkbox" checked={row.anticipates} onChange={(e) => updateRate(index, { anticipates: e.target.checked, anticipationFee: e.target.checked ? row.anticipationFee : "" })} />Tem antecipação</label>
+      {row.anticipates ? <label className="text-sm font-semibold">Taxa de antecipação (%)<input className="field mt-1" inputMode="decimal" placeholder="Ex.: 5,30" value={row.anticipationFee} onChange={(e) => updateRate(index, { anticipationFee: e.target.value })} /></label> : <p className="pb-2 text-sm text-slate-400">Sem taxa de antecipação</p>}
+    </div>)}</div>
+    {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}<div className="flex justify-end"><button className="btn btn-primary">Salvar forma de pagamento</button></div>
+  </form></Modal>;
+}
+
+function FinancialMethodModalGrouped({ accounts, onClose, onSaved }: { accounts: FinancialAccount[]; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState({ name: "", type: "PIX", institutionName: "", destinationAccountId: accounts[0]?.id ?? "", defaultFeePercentage: "0", fixedFee: "0", allowsAnticipation: false, anticipationFeePercentage: "0", settlementDays: "0", settlementDayType: "CALENDAR", maxInstallments: "1", requiresNsu: false, requiresReceiptCode: false, notes: "", brands: "Visa, Mastercard, Elo" });
   const [error, setError] = useState("");
   async function submit(event: React.FormEvent) {

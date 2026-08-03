@@ -54,6 +54,8 @@ const feeRuleSchema = z.object({
   installments: z.coerce.number().int().min(1).max(24).optional(),
   feePercentage: z.coerce.number().min(0).max(100),
   fixedFee: z.coerce.number().min(0).default(0),
+  allowsAnticipation: z.boolean().default(false),
+  anticipationFeePercentage: z.coerce.number().min(0).max(100).default(0),
   settlementDays: z.coerce.number().int().min(0).max(365).default(0),
   settlementDayType: z.enum(["CALENDAR", "BUSINESS"]).default("CALENDAR"),
   effectiveFrom: z.string().date(),
@@ -67,7 +69,8 @@ financialRouter.get("/payment-methods/active", async (req, res) => {
     where: { companyId: companyId(req), active: true, destinationAccount: { active: true } },
     include: {
       destinationAccount: { select: { id: true, name: true, type: true } },
-      brands: { where: { active: true }, orderBy: { brandName: "asc" } }
+      brands: { where: { active: true }, orderBy: { brandName: "asc" } },
+      feeRules: { where: { active: true }, orderBy: { installments: "asc" } }
     },
     orderBy: { name: "asc" }
   });

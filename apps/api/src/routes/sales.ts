@@ -659,7 +659,8 @@ async function buildPaymentPlan(
         && (rule.cardBrandId == null || rule.cardBrand?.brandName.toLocaleLowerCase("pt-BR") === payment.cardBrand?.trim().toLocaleLowerCase("pt-BR"))
       );
       const feePercentage = Number(matchingRule?.feePercentage ?? configured?.defaultFeePercentage ?? 0);
-      const anticipationFeePercentage = payment.anticipated && configured?.allowsAnticipation ? Number(configured.anticipationFeePercentage) : 0;
+      const allowsAnticipation = matchingRule?.allowsAnticipation ?? configured?.allowsAnticipation ?? false;
+      const anticipationFeePercentage = payment.anticipated && allowsAnticipation ? Number(matchingRule?.anticipationFeePercentage ?? configured?.anticipationFeePercentage ?? 0) : 0;
       const fixedFee = Number(matchingRule?.fixedFee ?? configured?.fixedFee ?? 0);
       const grossCents = Math.round(payment.amount * 100);
       const feeCents = Math.min(grossCents, Math.round(grossCents * (feePercentage + anticipationFeePercentage) / 100) + Math.round(fixedFee * 100));
