@@ -50,7 +50,7 @@ function normalizeSaleItemPayload(item: SaleItemForm) {
   }
   throw new Error("O pedido contém um item sem produto ou serviço vinculado.");
 }
-type PaymentForm = { method: PaymentMethod; financialPaymentMethodId?: string; amountCents: string; cardBrand: string; cardNsu: string; cardAuthorization: string; installments: string };
+type PaymentForm = { method: PaymentMethod; financialPaymentMethodId?: string; amountCents: string; cardBrand: string; cardNsu: string; cardAuthorization: string; installments: string; anticipate?: boolean };
 type PosPaymentMethod = "CASH" | "PIX" | "DEBIT" | "CREDIT";
 type PosPaymentForm = PaymentForm & { method: PosPaymentMethod; cashReceivedCents: string };
 type CashMovementType = "CASH_IN" | "CASH_OUT" | "EXPENSE" | "TRANSFER_IN" | "TRANSFER_OUT" | "ADJUSTMENT";
@@ -72,7 +72,7 @@ type ReusableEditTarget = { kind: ReusableKind; label: string; option: ReusableO
 type ConnectionState = "UNKNOWN" | "CHECKING" | "ONLINE" | "OFFLINE" | "SYNCING";
 type FinancialAccount = { id: string; name: string; type: "CASH_DRAWER" | "CHECKING_ACCOUNT" | "SAVINGS_ACCOUNT" | "DIGITAL_ACCOUNT" | "PAYMENT_WALLET" | "OTHER"; institutionName?: string | null; openingBalance: number | string; openingBalanceDate: string; calculatedBalance?: number; isPrimary: boolean; active: boolean; notes?: string | null };
 type FinancialFeeRule = { id: string; installments?: number | null; feePercentage: number | string; fixedFee: number | string; settlementDays: number; effectiveFrom: string; effectiveUntil?: string | null; active: boolean };
-type FinancialPaymentMethod = { id: string; name: string; type: "CASH" | "PIX" | "DEBIT_CARD" | "CREDIT_CARD" | "BANK_TRANSFER" | "OTHER"; institutionName?: string | null; destinationAccountId: string; destinationAccount: FinancialAccount; defaultFeePercentage: number | string; fixedFee: number | string; settlementDays: number; settlementDayType: "CALENDAR" | "BUSINESS"; maxInstallments: number; requiresNsu: boolean; requiresReceiptCode: boolean; active: boolean; brands: { id: string; brandName: string; active: boolean }[]; feeRules: FinancialFeeRule[] };
+type FinancialPaymentMethod = { id: string; name: string; type: "CASH" | "PIX" | "DEBIT_CARD" | "CREDIT_CARD" | "BANK_TRANSFER" | "OTHER"; institutionName?: string | null; destinationAccountId: string; destinationAccount: FinancialAccount; defaultFeePercentage: number | string; fixedFee: number | string; allowsAnticipation: boolean; anticipationFeePercentage: number | string; settlementDays: number; settlementDayType: "CALENDAR" | "BUSINESS"; maxInstallments: number; requiresNsu: boolean; requiresReceiptCode: boolean; active: boolean; brands: { id: string; brandName: string; active: boolean }[]; feeRules: FinancialFeeRule[] };
 
 const genderLabels: Record<string, string> = { MALE: "Masculino", FEMALE: "Feminino", OTHER: "Outro", UNINFORMED: "Prefiro não informar" };
 const petStatusLabels: Record<string, string> = { ACTIVE: "Ativo", INACTIVE: "Inativo", DECEASED: "Falecido" };
@@ -2583,7 +2583,7 @@ const cardBrands = ["Visa", "Mastercard", "Elo", "Hipercard", "American Express"
 
 function emptyPosPayment(amount: number): PosPaymentForm {
   const amountCents = centsFromCurrency(amount);
-  return { method: "PIX", amountCents, cashReceivedCents: amountCents, cardBrand: "", cardNsu: "", cardAuthorization: "", installments: "1" };
+  return { method: "PIX", amountCents, cashReceivedCents: amountCents, cardBrand: "", cardNsu: "", cardAuthorization: "", installments: "1", anticipate: false };
 }
 
 function legacyMethodFromFinancial(type: FinancialPaymentMethod["type"]): PosPaymentMethod {
@@ -2609,8 +2609,8 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
     if (!financialMethods?.length) return;
     setRows((current) => current.map((row) => {
       if (row.financialPaymentMethodId) return row;
-      const configured = financialMethods.find((method) => legacyMethodFromFinancial(method.type) === row.method);
-      return configured ? { ...row, financialPaymentMethodId: configured.id } : row;
+      const configured = financialMethods.find((method) => legacyMethodFromFinancial(method.type) === row.method) ?? financialMethods[0];
+      return { ...row, financialPaymentMethodId: configured.id, method: legacyMethodFromFinancial(configured.type) };
     }));
   }, [financialMethods]);
 
@@ -2631,7 +2631,8 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
 
   function addRow() {
     const openBalance = Math.max(0, balance - newPaid);
-    setRows([...rows, emptyPosPayment(openBalance)]);
+    const firstMethod = financialMethods?.[0];
+    setRows([...rows, { ...emptyPosPayment(openBalance), financialPaymentMethodId: firstMethod?.id, method: firstMethod ? legacyMethodFromFinancial(firstMethod.type) : "PIX" }]);
   }
 
   function paymentPayload() {
@@ -2646,7 +2647,8 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
         cardAuthorization: row.method === "DEBIT" || row.method === "CREDIT" ? row.cardAuthorization.trim() || undefined : undefined,
         installments: row.method === "CREDIT" ? Number(row.installments || 0) : undefined,
         cashReceived: row.method === "CASH" ? decimalFromCents(row.cashReceivedCents) : undefined,
-        changeAmount: row.method === "CASH" ? Math.max(0, decimalFromCents(row.cashReceivedCents) - decimalFromCents(row.amountCents)) : undefined
+        changeAmount: row.method === "CASH" ? Math.max(0, decimalFromCents(row.cashReceivedCents) - decimalFromCents(row.amountCents)) : undefined,
+        anticipated: Boolean(row.anticipate)
       }))
       .filter((payment) => payment.amount > 0);
   }
@@ -2657,6 +2659,7 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
     if (!payments.length) nextErrors.form = "Adicione ao menos uma forma de pagamento.";
     rows.forEach((row, index) => {
       const amount = decimalFromCents(row.amountCents);
+      if (!row.financialPaymentMethodId) nextErrors[`method-${index}`] = "Cadastre e selecione uma forma de pagamento.";
       if (amount <= 0) nextErrors[`amount-${index}`] = "Informe um valor maior que zero.";
       if (row.method === "CASH" && decimalFromCents(row.cashReceivedCents) < amount) nextErrors[`cash-${index}`] = "Valor entregue não pode ser menor que o valor usado.";
       if ((row.method === "DEBIT" || row.method === "CREDIT") && !row.cardBrand.trim()) nextErrors[`brand-${index}`] = "Informe a bandeira.";
@@ -2723,14 +2726,16 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
               <select className="field" value={row.financialPaymentMethodId ?? `legacy:${row.method}`} onChange={(event) => {
                 const configured = financialMethods?.find((method) => method.id === event.target.value);
                 updateRow(index, configured ? { financialPaymentMethodId: configured.id, method: legacyMethodFromFinancial(configured.type), cardBrand: "", cardNsu: "", installments: "1" } : { financialPaymentMethodId: undefined, method: event.target.value.replace("legacy:", "") as PosPaymentMethod });
-              }}>{financialMethods?.length ? financialMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>) : posPaymentMethods.map((method) => <option key={method.value} value={`legacy:${method.value}`}>{method.label}</option>)}</select>
+              }}>{financialMethods?.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}</select>
               <input className="field" placeholder="Valor" inputMode="numeric" value={formatCurrencyInput(row.amountCents)} onChange={(event) => updateRow(index, { amountCents: onlyDigits(event.target.value) })} />
               {row.method === "CASH" && <div className="grid gap-2 md:grid-cols-2"><input className="field" placeholder="Valor entregue" inputMode="numeric" value={formatCurrencyInput(row.cashReceivedCents)} onChange={(event) => updateRow(index, { cashReceivedCents: onlyDigits(event.target.value) })} /><p className="self-center text-sm font-medium">Troco: {currency(change)}</p></div>}
               {row.method === "PIX" && <input className="field" placeholder="Código do comprovante PIX" value={row.cardNsu} onChange={(event) => updateRow(index, { cardNsu: event.target.value })} />}
               {(row.method === "DEBIT" || row.method === "CREDIT") && <div className="grid gap-2 md:grid-cols-3"><select className="field" value={row.cardBrand} onChange={(event) => updateRow(index, { cardBrand: event.target.value })}><option value="">Bandeira</option>{(financialMethods?.find((method) => method.id === row.financialPaymentMethodId)?.brands.map((brand) => brand.brandName) ?? cardBrands).map((brand) => <option key={brand} value={brand}>{brand}</option>)}</select>{row.method === "CREDIT" && <select className="field" value={row.installments} onChange={(event) => updateRow(index, { installments: event.target.value })}>{Array.from({ length: financialMethods?.find((method) => method.id === row.financialPaymentMethodId)?.maxInstallments ?? 12 }, (_, optionIndex) => optionIndex + 1).map((installment) => <option key={installment} value={installment}>{installment}x</option>)}</select>}<input className="field" placeholder="NSU" value={row.cardNsu} onChange={(event) => updateRow(index, { cardNsu: event.target.value })} /></div>}
               <button className="btn btn-secondary" type="button" disabled={rows.length === 1} onClick={() => removeRow(index)}><Trash2 size={16} /></button>
             </div>
+            {financialMethods?.find((method) => method.id === row.financialPaymentMethodId)?.allowsAnticipation && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(row.anticipate)} onChange={(event) => updateRow(index, { anticipate: event.target.checked })} />Antecipar recebimento — taxa de {Number(financialMethods.find((method) => method.id === row.financialPaymentMethodId)?.anticipationFeePercentage ?? 0).toLocaleString("pt-BR")}%</label>}
             {errors[`amount-${index}`] && <p className="text-sm text-red-700">{errors[`amount-${index}`]}</p>}
+            {errors[`method-${index}`] && <p className="text-sm text-red-700">{errors[`method-${index}`]}</p>}
             {errors[`cash-${index}`] && <p className="text-sm text-red-700">{errors[`cash-${index}`]}</p>}
             {errors[`brand-${index}`] && <p className="text-sm text-red-700">{errors[`brand-${index}`]}</p>}
             {errors[`nsu-${index}`] && <p className="text-sm text-red-700">{errors[`nsu-${index}`]}</p>}
@@ -3320,8 +3325,8 @@ function SaleReceiveModal({ sale, session, cashSession, onClose, onSaved }: { sa
     const methodMap: Record<FinancialPaymentMethod["type"], PaymentMethod> = { CASH: "CASH", PIX: "PIX", DEBIT_CARD: "DEBIT", CREDIT_CARD: "CREDIT", BANK_TRANSFER: "TRANSFER", OTHER: "OTHER" };
     setPaymentRows((current) => current.map((row) => {
       if (row.financialPaymentMethodId) return row;
-      const configured = financialMethods.find((method) => methodMap[method.type] === row.method);
-      return configured ? { ...row, financialPaymentMethodId: configured.id } : row;
+      const configured = financialMethods.find((method) => methodMap[method.type] === row.method) ?? financialMethods[0];
+      return { ...row, financialPaymentMethodId: configured.id, method: methodMap[configured.type] };
     }));
   }, [financialMethods]);
 
@@ -3626,9 +3631,39 @@ function FinancialAccountModal({ onClose, onSaved }: { onClose: () => void; onSa
 }
 
 function FinancialMethodModal({ accounts, onClose, onSaved }: { accounts: FinancialAccount[]; onClose: () => void; onSaved: () => void }) {
-  const [form, setForm] = useState({ name: "", type: "PIX", institutionName: "", destinationAccountId: accounts[0]?.id ?? "", defaultFeePercentage: "0", fixedFee: "0", settlementDays: "0", settlementDayType: "CALENDAR", maxInstallments: "1", requiresNsu: false, requiresReceiptCode: false, active: true, notes: "", brands: "Visa, Mastercard, Elo" });
+  const [form, setForm] = useState({ name: "", type: "PIX", institutionName: "", destinationAccountId: accounts[0]?.id ?? "", defaultFeePercentage: "0", fixedFee: "0", allowsAnticipation: false, anticipationFeePercentage: "0", settlementDays: "0", settlementDayType: "CALENDAR", maxInstallments: "1", requiresNsu: false, requiresReceiptCode: false, notes: "", brands: "Visa, Mastercard, Elo" });
   const [error, setError] = useState("");
-  async function submit(event: React.FormEvent) { event.preventDefault(); setError(""); try { await api("/financial/payment-methods", { method: "POST", body: JSON.stringify({ ...form, defaultFeePercentage: Number(form.defaultFeePercentage.replace(",", ".")), fixedFee: Number(form.fixedFee.replace(",", ".")), settlementDays: Number(form.settlementDays), maxInstallments: Number(form.maxInstallments), brands: ["DEBIT_CARD", "CREDIT_CARD"].includes(form.type) ? form.brands.split(",").map((item) => item.trim()).filter(Boolean) : [] }) }); onSaved(); } catch (e) { setError(e instanceof Error ? e.message : "Não foi possível salvar a forma."); } }
+  async function submit(event: React.FormEvent) {
+    event.preventDefault(); setError("");
+    try {
+      await api("/financial/payment-methods", { method: "POST", body: JSON.stringify({ ...form, active: true, defaultFeePercentage: Number(form.defaultFeePercentage.replace(",", ".")), fixedFee: Number(form.fixedFee.replace(",", ".")), anticipationFeePercentage: Number(form.anticipationFeePercentage.replace(",", ".")), settlementDays: Number(form.settlementDays), maxInstallments: Number(form.maxInstallments), brands: ["DEBIT_CARD", "CREDIT_CARD"].includes(form.type) ? form.brands.split(",").map((item) => item.trim()).filter(Boolean) : [] }) });
+      onSaved();
+    } catch (e) { setError(e instanceof Error ? e.message : "Não foi possível salvar a forma de pagamento."); }
+  }
+  const isCard = ["DEBIT_CARD", "CREDIT_CARD"].includes(form.type);
+  return <Modal title="Nova forma de pagamento" onClose={onClose}><form className="grid gap-3 sm:grid-cols-2" onSubmit={submit}>
+    <label className="text-sm font-medium">Nome da forma<input className="field mt-1" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+    <label className="text-sm font-medium">Tipo<select className="field mt-1" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value, requiresNsu: ["DEBIT_CARD", "CREDIT_CARD"].includes(e.target.value) })}>{Object.entries(financialPaymentTypeLabels).filter(([value]) => value !== "CASH").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+    <label className="text-sm font-medium">Instituição ou maquininha<input className="field mt-1" value={form.institutionName} onChange={(e) => setForm({ ...form, institutionName: e.target.value })} /></label>
+    <label className="text-sm font-medium">Conta de destino<select className="field mt-1" required value={form.destinationAccountId} onChange={(e) => setForm({ ...form, destinationAccountId: e.target.value })}>{accounts.map((account) => <option value={account.id} key={account.id}>{account.name}</option>)}</select></label>
+    <label className="text-sm font-medium">Taxa percentual (%)<input className="field mt-1" inputMode="decimal" value={form.defaultFeePercentage} onChange={(e) => setForm({ ...form, defaultFeePercentage: e.target.value })} /></label>
+    <label className="text-sm font-medium">Taxa fixa<input className="field mt-1" inputMode="decimal" value={form.fixedFee} onChange={(e) => setForm({ ...form, fixedFee: e.target.value })} /></label>
+    {form.type === "CREDIT_CARD" && <label className="text-sm font-medium">Máximo de parcelas<input className="field mt-1" inputMode="numeric" value={form.maxInstallments} onChange={(e) => setForm({ ...form, maxInstallments: onlyDigits(e.target.value, 2) })} /></label>}
+    {isCard && <label className="text-sm font-medium sm:col-span-2">Bandeiras aceitas, separadas por vírgula<input className="field mt-1" value={form.brands} onChange={(e) => setForm({ ...form, brands: e.target.value })} /></label>}
+    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.allowsAnticipation} onChange={(e) => setForm({ ...form, allowsAnticipation: e.target.checked })} />Permitir antecipação</label>
+    {form.allowsAnticipation && <label className="text-sm font-medium">Taxa de antecipação (%)<input className="field mt-1" inputMode="decimal" value={form.anticipationFeePercentage} onChange={(e) => setForm({ ...form, anticipationFeePercentage: e.target.value })} /></label>}
+    <label className="text-sm font-medium">Prazo para recebimento (dias)<input className="field mt-1" inputMode="numeric" value={form.settlementDays} onChange={(e) => setForm({ ...form, settlementDays: onlyDigits(e.target.value) })} /></label>
+    <label className="text-sm font-medium">Contagem do prazo<select className="field mt-1" value={form.settlementDayType} onChange={(e) => setForm({ ...form, settlementDayType: e.target.value })}><option value="CALENDAR">Dias corridos</option><option value="BUSINESS">Dias úteis</option></select></label>
+    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.requiresNsu} onChange={(e) => setForm({ ...form, requiresNsu: e.target.checked })} />NSU obrigatória</label>
+    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.requiresReceiptCode} onChange={(e) => setForm({ ...form, requiresReceiptCode: e.target.checked })} />Comprovante obrigatório</label>
+    {error && <p className="text-sm text-red-700 sm:col-span-2">{error}</p>}<button className="btn btn-primary justify-self-end sm:col-span-2">Salvar forma de pagamento</button>
+  </form></Modal>;
+}
+
+function FinancialMethodModalLegacy({ accounts, onClose, onSaved }: { accounts: FinancialAccount[]; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState({ name: "", type: "PIX", institutionName: "", destinationAccountId: accounts[0]?.id ?? "", defaultFeePercentage: "0", fixedFee: "0", allowsAnticipation: false, anticipationFeePercentage: "0", settlementDays: "0", settlementDayType: "CALENDAR", maxInstallments: "1", requiresNsu: false, requiresReceiptCode: false, active: true, notes: "", brands: "Visa, Mastercard, Elo" });
+  const [error, setError] = useState("");
+  async function submit(event: React.FormEvent) { event.preventDefault(); setError(""); try { await api("/financial/payment-methods", { method: "POST", body: JSON.stringify({ ...form, defaultFeePercentage: Number(form.defaultFeePercentage.replace(",", ".")), fixedFee: Number(form.fixedFee.replace(",", ".")), anticipationFeePercentage: Number(form.anticipationFeePercentage.replace(",", ".")), settlementDays: Number(form.settlementDays), maxInstallments: Number(form.maxInstallments), brands: ["DEBIT_CARD", "CREDIT_CARD"].includes(form.type) ? form.brands.split(",").map((item) => item.trim()).filter(Boolean) : [] }) }); onSaved(); } catch (e) { setError(e instanceof Error ? e.message : "Não foi possível salvar a forma."); } }
   return <Modal title="Nova forma de recebimento" onClose={onClose}><form className="grid gap-3 sm:grid-cols-2" onSubmit={submit}><input className="field" required placeholder="Nome de identificação" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /><select className="field" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value, requiresNsu: ["DEBIT_CARD", "CREDIT_CARD"].includes(e.target.value) })}>{Object.entries(financialPaymentTypeLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><input className="field" placeholder="Instituição/maquininha" value={form.institutionName} onChange={(e) => setForm({ ...form, institutionName: e.target.value })} /><select className="field" required value={form.destinationAccountId} onChange={(e) => setForm({ ...form, destinationAccountId: e.target.value })}>{accounts.filter((account) => form.type !== "CASH" || account.type === "CASH_DRAWER").map((account) => <option value={account.id} key={account.id}>{account.name}</option>)}</select>{form.type !== "CASH" && <><input className="field" inputMode="decimal" placeholder="Taxa percentual" value={form.defaultFeePercentage} onChange={(e) => setForm({ ...form, defaultFeePercentage: e.target.value })} /><input className="field" inputMode="decimal" placeholder="Taxa fixa" value={form.fixedFee} onChange={(e) => setForm({ ...form, fixedFee: e.target.value })} /><input className="field" inputMode="numeric" placeholder="Prazo em dias" value={form.settlementDays} onChange={(e) => setForm({ ...form, settlementDays: onlyDigits(e.target.value) })} /><select className="field" value={form.settlementDayType} onChange={(e) => setForm({ ...form, settlementDayType: e.target.value })}><option value="CALENDAR">Dias corridos</option><option value="BUSINESS">Dias úteis</option></select></>}{form.type === "CREDIT_CARD" && <input className="field" inputMode="numeric" placeholder="Máximo de parcelas" value={form.maxInstallments} onChange={(e) => setForm({ ...form, maxInstallments: onlyDigits(e.target.value, 2) })} />}{["DEBIT_CARD", "CREDIT_CARD"].includes(form.type) && <input className="field" placeholder="Bandeiras separadas por vírgula" value={form.brands} onChange={(e) => setForm({ ...form, brands: e.target.value })} />}<label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.requiresNsu} onChange={(e) => setForm({ ...form, requiresNsu: e.target.checked })} />NSU obrigatória</label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.requiresReceiptCode} onChange={(e) => setForm({ ...form, requiresReceiptCode: e.target.checked })} />Comprovante obrigatório</label>{error && <p className="text-sm text-red-700 sm:col-span-2">{error}</p>}<button className="btn btn-primary justify-self-end sm:col-span-2">Salvar forma</button></form></Modal>;
 }
 

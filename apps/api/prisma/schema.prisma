@@ -697,6 +697,8 @@ model SalePayment {
   destinationAccountId String?
   grossAmount Decimal? @db.Decimal(10, 2)
   feePercentageSnapshot Decimal? @db.Decimal(7, 4)
+  anticipated Boolean @default(false)
+  anticipationFeePercentageSnapshot Decimal? @db.Decimal(7, 4)
   fixedFeeSnapshot Decimal? @db.Decimal(10, 2)
   feeAmount Decimal? @db.Decimal(10, 2)
   netAmount Decimal? @db.Decimal(10, 2)
@@ -750,6 +752,8 @@ model FinancialPaymentMethod {
   destinationAccountId String
   defaultFeePercentage Decimal @default(0) @db.Decimal(7, 4)
   fixedFee Decimal @default(0) @db.Decimal(10, 2)
+  allowsAnticipation Boolean @default(false)
+  anticipationFeePercentage Decimal @default(0) @db.Decimal(7, 4)
   settlementDays Int @default(0)
   settlementDayType SettlementDayType @default(CALENDAR)
   maxInstallments Int @default(1)

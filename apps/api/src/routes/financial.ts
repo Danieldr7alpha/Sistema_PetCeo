@@ -5,6 +5,17 @@ import { prisma } from "../lib/prisma.js";
 
 export const financialRouter = Router();
 
+async function ensureCashPaymentMethod(cid: string) {
+  const existing = await prisma.financialPaymentMethod.findFirst({ where: { companyId: cid, type: "CASH" } });
+  if (existing) {
+    if (!existing.active) await prisma.financialPaymentMethod.update({ where: { id: existing.id }, data: { active: true } });
+    return;
+  }
+  let account = await prisma.financialAccount.findFirst({ where: { companyId: cid, type: "CASH_DRAWER" }, orderBy: { createdAt: "asc" } });
+  if (!account) account = await prisma.financialAccount.create({ data: { companyId: cid, name: "Caixa físico", type: "CASH_DRAWER", openingBalanceDate: new Date(), isPrimary: true } });
+  await prisma.financialPaymentMethod.create({ data: { companyId: cid, name: "Dinheiro", type: "CASH", destinationAccountId: account.id, active: true } });
+}
+
 const accountSchema = z.object({
   name: z.string().trim().min(2),
   type: z.enum(["CASH_DRAWER", "CHECKING_ACCOUNT", "SAVINGS_ACCOUNT", "DIGITAL_ACCOUNT", "PAYMENT_WALLET", "OTHER"]),
@@ -26,6 +37,8 @@ const paymentMethodSchema = z.object({
   destinationAccountId: z.string().min(1),
   defaultFeePercentage: z.coerce.number().min(0).max(100).default(0),
   fixedFee: z.coerce.number().min(0).default(0),
+  allowsAnticipation: z.boolean().default(false),
+  anticipationFeePercentage: z.coerce.number().min(0).max(100).default(0),
   settlementDays: z.coerce.number().int().min(0).max(365).default(0),
   settlementDayType: z.enum(["CALENDAR", "BUSINESS"]).default("CALENDAR"),
   maxInstallments: z.coerce.number().int().min(1).max(24).default(1),
@@ -49,6 +62,7 @@ const feeRuleSchema = z.object({
 });
 
 financialRouter.get("/payment-methods/active", async (req, res) => {
+  await ensureCashPaymentMethod(companyId(req));
   const methods = await prisma.financialPaymentMethod.findMany({
     where: { companyId: companyId(req), active: true, destinationAccount: { active: true } },
     include: {
@@ -117,6 +131,7 @@ financialRouter.patch("/accounts/:id", async (req, res) => {
 });
 
 financialRouter.get("/payment-methods", async (req, res) => {
+  await ensureCashPaymentMethod(companyId(req));
   const methods = await prisma.financialPaymentMethod.findMany({
     where: { companyId: companyId(req) },
     include: { destinationAccount: true, brands: { orderBy: { brandName: "asc" } }, feeRules: { orderBy: { effectiveFrom: "desc" } } },
@@ -131,6 +146,7 @@ financialRouter.post("/payment-methods", async (req, res) => {
   const account = await prisma.financialAccount.findFirst({ where: { id: body.destinationAccountId, companyId: cid, active: true } });
   if (!account) return res.status(400).json({ message: "Selecione uma conta financeira ativa da empresa." });
   if (body.type === "CASH" && account.type !== "CASH_DRAWER") return res.status(400).json({ message: "Dinheiro deve ser destinado a um caixa físico." });
+  if (body.type === "CASH" && await prisma.financialPaymentMethod.findFirst({ where: { companyId: cid, type: "CASH" } })) return res.status(409).json({ message: "A forma Dinheiro já existe e é padrão do sistema." });
   const { brands, ...methodData } = body;
   const method = await prisma.financialPaymentMethod.create({
     data: {
@@ -138,6 +154,8 @@ financialRouter.post("/payment-methods", async (req, res) => {
       companyId: cid,
       defaultFeePercentage: body.type === "CASH" ? 0 : body.defaultFeePercentage,
       fixedFee: body.type === "CASH" ? 0 : body.fixedFee,
+      allowsAnticipation: body.type === "CASH" ? false : body.allowsAnticipation,
+      anticipationFeePercentage: body.type === "CASH" ? 0 : body.anticipationFeePercentage,
       settlementDays: body.type === "CASH" ? 0 : body.settlementDays,
       maxInstallments: body.type === "CREDIT_CARD" ? body.maxInstallments : 1,
       brands: { create: [...new Set(brands.map((brand) => brand.trim()).filter(Boolean))].map((brandName) => ({ companyId: cid, brandName })) }
@@ -152,6 +170,7 @@ financialRouter.patch("/payment-methods/:id", async (req, res) => {
   const body = paymentMethodSchema.partial().omit({ brands: true }).parse(req.body);
   const existing = await prisma.financialPaymentMethod.findFirst({ where: { id: req.params.id, companyId: cid } });
   if (!existing) return res.status(404).json({ message: "Forma de recebimento não encontrada." });
+  if (existing.type === "CASH" && (body.active === false || (body.type && body.type !== "CASH"))) return res.status(400).json({ message: "Dinheiro é uma forma padrão do sistema e não pode ser desativada ou alterada." });
   if (body.destinationAccountId) {
     const account = await prisma.financialAccount.findFirst({ where: { id: body.destinationAccountId, companyId: cid, active: true } });
     if (!account) return res.status(400).json({ message: "Conta financeira de destino inválida." });

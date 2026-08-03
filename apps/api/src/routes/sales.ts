@@ -24,7 +24,8 @@ const salePaymentSchema = z.object({
   installments: z.coerce.number().int().positive().optional(),
   pixReference: z.string().optional(),
   cashReceived: z.coerce.number().positive().optional(),
-  changeAmount: z.coerce.number().nonnegative().optional()
+  changeAmount: z.coerce.number().nonnegative().optional(),
+  anticipated: z.boolean().default(false)
 });
 
 const checkoutSchema = z.object({
@@ -579,9 +580,15 @@ async function buildPaymentPlan(
       ? [{
         method: body.paymentMethod,
         amount: total,
+        anticipated: false,
+        financialPaymentMethodId: undefined,
         cardBrand: body.cardBrand,
         cardNsu: body.cardNsu,
-        cardAuthorization: body.cardAuthorization
+        cardAuthorization: body.cardAuthorization,
+        installments: undefined,
+        pixReference: undefined,
+        cashReceived: undefined,
+        changeAmount: undefined
       }]
       : [];
   const paymentReferences = new Set<string>();
@@ -652,9 +659,10 @@ async function buildPaymentPlan(
         && (rule.cardBrandId == null || rule.cardBrand?.brandName.toLocaleLowerCase("pt-BR") === payment.cardBrand?.trim().toLocaleLowerCase("pt-BR"))
       );
       const feePercentage = Number(matchingRule?.feePercentage ?? configured?.defaultFeePercentage ?? 0);
+      const anticipationFeePercentage = payment.anticipated && configured?.allowsAnticipation ? Number(configured.anticipationFeePercentage) : 0;
       const fixedFee = Number(matchingRule?.fixedFee ?? configured?.fixedFee ?? 0);
       const grossCents = Math.round(payment.amount * 100);
-      const feeCents = Math.min(grossCents, Math.round(grossCents * feePercentage / 100) + Math.round(fixedFee * 100));
+      const feeCents = Math.min(grossCents, Math.round(grossCents * (feePercentage + anticipationFeePercentage) / 100) + Math.round(fixedFee * 100));
       const settlementDays = matchingRule?.settlementDays ?? configured?.settlementDays ?? 0;
       const settlementDayType = matchingRule?.settlementDayType ?? configured?.settlementDayType ?? "CALENDAR";
       return {
@@ -678,6 +686,8 @@ async function buildPaymentPlan(
         destinationAccountId: configured?.destinationAccountId,
         grossAmount: grossCents / 100,
         feePercentageSnapshot: feePercentage,
+        anticipated: anticipationFeePercentage > 0,
+        anticipationFeePercentageSnapshot: anticipationFeePercentage,
         fixedFeeSnapshot: fixedFee,
         feeAmount: feeCents / 100,
         netAmount: (grossCents - feeCents) / 100,
