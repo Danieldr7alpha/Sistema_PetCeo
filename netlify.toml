@@ -1,5 +1,5 @@
 [build]
-  command = "npm run build -w apps/web"
+  command = "npm run prisma:generate -w apps/api && npm run build -w apps/web"
   publish = "apps/web/dist"
   functions = "netlify/functions"
 
