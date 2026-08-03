@@ -1902,7 +1902,7 @@ function Checkout({ draft, chargeSaleId, onClearDraft, session, sectionPage }: {
     {section === "preSales" && <CashPreSales onReceive={(sale) => setSaleModal({ sale })} />}
     {section === "pending" && <CashPendingSales onOpenInPos={openSaleInPos} />}
     {section === "movements" && cashStateReady && <CashMovements cashSession={cashSession} onRefresh={refreshCash} />}
-    {section === "reports" && <CashReports isAdmin={session.user.role === "ADMIN"} />}
+    {section === "reports" && <CashReports isAdmin={session.user.role === "ADMIN"} cashSession={cashSession} />}
 
     {saleModal && <SaleReceiveModal sale={saleModal.sale} session={session} cashSession={cashSession} onClose={() => setSaleModal(null)} onSaved={() => { setSaleModal(null); refreshPos(); }} />}
   </Page>;
@@ -3197,12 +3197,15 @@ function CashSalesHistory() {
   </div>;
 }
 
-function CashReports({ isAdmin }: { isAdmin: boolean }) {
-  const [period, setPeriod] = useState("today");
+function CashReports({ isAdmin, cashSession }: { isAdmin: boolean; cashSession: CashSession | null }) {
+  const [period, setPeriod] = useState(cashSession ? "current" : "today");
   const [customFrom, setCustomFrom] = useState(localDateInput());
   const [customTo, setCustomTo] = useState(localDateInput());
   const range = cashPeriodRange(period, customFrom, customTo);
-  const { data } = useData<CashReport>(isAdmin ? `/cash/reports/summary?from=${range.from}&to=${range.to}` : "", [isAdmin, period, customFrom, customTo]);
+  const reportParams = period === "current" && cashSession
+    ? `cashSessionId=${encodeURIComponent(cashSession.id)}`
+    : `from=${range.from}&to=${range.to}`;
+  const { data } = useData<CashReport>(isAdmin ? `/cash/reports/summary?${reportParams}` : "", [isAdmin, period, customFrom, customTo, cashSession?.id]);
   const paymentDetails = data?.paymentDetails ?? [];
   const paymentGroups = [...paymentDetails.reduce((groups, payment) => {
     const isCard = payment.method === "DEBIT" || payment.method === "CREDIT";
@@ -3226,7 +3229,7 @@ function CashReports({ isAdmin }: { isAdmin: boolean }) {
   ];
   if (!isAdmin) return <div className="panel p-4 text-sm text-slate-600">Relatórios são visíveis apenas para administradores.</div>;
   return <div className="grid gap-4">
-    <div className="panel grid gap-3 p-3 md:grid-cols-3"><select className="field" value={period} onChange={(event) => setPeriod(event.target.value)}><option value="today">Hoje</option><option value="yesterday">Ontem</option><option value="week">Semana</option><option value="month">Mês</option><option value="custom">Personalizado</option></select>{period === "custom" && <><input className="field" type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /><input className="field" type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></>}</div>
+    <div className="panel grid gap-3 p-3 md:grid-cols-3"><select className="field" value={period} onChange={(event) => setPeriod(event.target.value)}>{cashSession && <option value="current">Caixa atual — desde a abertura</option>}<option value="today">Hoje</option><option value="yesterday">Ontem</option><option value="week">Semana</option><option value="month">Mês</option><option value="custom">Personalizado</option></select>{period === "custom" && <><input className="field" type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /><input className="field" type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></>}</div>
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">{summaryCards.map((card) => <div className="panel min-w-0 p-4" key={card.label}><p className="text-sm font-medium text-slate-500">{card.label}</p><b className="mt-1 block whitespace-nowrap text-lg">{currency(card.value)}</b></div>)}</div>
     {paymentGroups.length > 0 && <div className="grid gap-4 lg:grid-cols-2">{paymentGroups.map((group) => <PaymentReportGroup key={group.key} title={group.title} method={group.method} payments={group.payments} />)}</div>}
     <div className="grid gap-4 lg:grid-cols-2"><ReportList title="Vendas por operador" items={data?.byOperator ?? []} /><ReportList title="Vendas por serviço" items={data?.byService ?? []} /><ReportList title="Vendas por produto" items={data?.byProduct ?? []} /><ReportList title="Horários das vendas" items={(data?.byHour ?? []).map((item) => ({ name: `${item.hour}h`, total: item.total }))} /></div>

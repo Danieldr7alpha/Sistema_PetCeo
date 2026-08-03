@@ -187,14 +187,13 @@ async function cashReportSummary(req: Request, res: import("express").Response) 
   const { from, to } = periodFromQuery(req);
   const cashSessionId = req.query.cashSessionId ? String(req.query.cashSessionId) : undefined;
   const sales = await prisma.sale.findMany({
-    where: { companyId: cid, ...(cashSessionId ? { cashSessionId } : {}), createdAt: { gte: from, lte: to } },
+    where: { companyId: cid, ...(cashSessionId ? { cashSessionId } : { createdAt: { gte: from, lte: to } }) },
     include: { items: { include: { service: true, product: true } } }
   });
   const receivedPayments = await prisma.salePayment.findMany({
     where: {
       companyId: cid,
-      ...(cashSessionId ? { cashSessionId } : {}),
-      paidAt: { gte: from, lte: to },
+      ...(cashSessionId ? { cashSessionId } : { paidAt: { gte: from, lte: to } }),
       sale: { status: { notIn: ["CANCELLED", "REFUNDED"] } }
     },
     include: { sale: { include: { customer: true, pet: true, receipt: true } } },
