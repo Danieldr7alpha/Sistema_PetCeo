@@ -1,6 +1,6 @@
 import { cacheResponse, invalidateCachedResponses, readCachedResponse } from "./offline";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:3333";
+const API_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? "/api" : "http://127.0.0.1:3333");
 export type ConnectionFailure = "api" | "database";
 
 function reportNetworkFailure() {

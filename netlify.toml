@@ -1,0 +1,14 @@
+[build]
+  command = "npm run build -w apps/web"
+  publish = "apps/web/dist"
+  functions = "netlify/functions"
+
+[functions]
+  external_node_modules = ["@prisma/adapter-pg", "@prisma/client", "bcryptjs", "express", "jsonwebtoken", "pg", "serverless-http"]
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true

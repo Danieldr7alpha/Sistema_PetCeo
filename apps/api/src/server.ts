@@ -16,7 +16,7 @@ import { cashRouter } from "./routes/cash.js";
 import { financialRouter } from "./routes/financial.js";
 import { prisma } from "./lib/prisma.js";
 
-const app = express();
+export const app = express();
 const allowedOrigins = new Set(
   ["http://localhost:5173", "http://127.0.0.1:5173", process.env.WEB_ORIGIN]
     .filter(Boolean)
@@ -76,7 +76,9 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   return res.status(500).json({ message: "Erro interno" });
 });
 
-const port = Number(process.env.PORT ?? 3333);
-app.listen(port, () => {
-  console.log(`CEO Pet AI API running on http://localhost:${port}`);
-});
+if (!process.env.NETLIFY) {
+  const port = Number(process.env.PORT ?? 3333);
+  app.listen(port, () => {
+    console.log(`CEO Pet AI API running on http://localhost:${port}`);
+  });
+}
