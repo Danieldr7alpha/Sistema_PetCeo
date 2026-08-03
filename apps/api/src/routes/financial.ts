@@ -159,6 +159,7 @@ financialRouter.post("/payment-methods", async (req, res) => {
   const account = await prisma.financialAccount.findFirst({ where: { id: body.destinationAccountId, companyId: cid, active: true } });
   if (!account) return res.status(400).json({ message: "Selecione uma conta financeira ativa da empresa." });
   if (body.type === "CASH" && account.type !== "CASH_DRAWER") return res.status(400).json({ message: "Dinheiro deve ser destinado a um caixa físico." });
+  if (body.type !== "CASH" && account.type === "CASH_DRAWER") return res.status(400).json({ message: "PIX e cartões devem ser destinados a uma conta bancária, não ao Caixa físico." });
   if (body.type === "CASH" && await prisma.financialPaymentMethod.findFirst({ where: { companyId: cid, type: "CASH" } })) return res.status(409).json({ message: "A forma Dinheiro já existe e é padrão do sistema." });
   const { brands, ...methodData } = body;
   const method = await prisma.financialPaymentMethod.create({
@@ -187,6 +188,9 @@ financialRouter.patch("/payment-methods/:id", async (req, res) => {
   if (body.destinationAccountId) {
     const account = await prisma.financialAccount.findFirst({ where: { id: body.destinationAccountId, companyId: cid, active: true } });
     if (!account) return res.status(400).json({ message: "Conta financeira de destino inválida." });
+    const resultingType = body.type ?? existing.type;
+    if (resultingType === "CASH" && account.type !== "CASH_DRAWER") return res.status(400).json({ message: "Dinheiro deve ser destinado ao Caixa físico." });
+    if (resultingType !== "CASH" && account.type === "CASH_DRAWER") return res.status(400).json({ message: "Selecione um banco para receber PIX e cartões." });
   }
   const { brands, ...methodData } = body;
   const updated = await prisma.$transaction(async (tx) => {

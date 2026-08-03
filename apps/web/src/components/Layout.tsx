@@ -27,7 +27,7 @@ const cashSubmenus = [
 
 const financialSubmenus = [
   { key: "financial", label: "Visão geral" },
-  { key: "financial:accounts", label: "Contas financeiras" },
+  { key: "financial:accounts", label: "Bancos" },
   { key: "financial:methods", label: "Formas de recebimento" },
   { key: "financial:receivables", label: "Recebimentos previstos" },
   { key: "financial:payables", label: "Contas a pagar" },
