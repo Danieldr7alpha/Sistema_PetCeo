@@ -78,6 +78,7 @@ const payableSchema = z.object({
   competenceMonth: z.string().regex(/^\d{4}-\d{2}$/).optional(),
   recurring: z.boolean().default(false),
   repeatMonths: z.coerce.number().int().min(1).max(60).default(1),
+  indefinite: z.boolean().default(false),
   notes: z.string().trim().optional()
 });
 
@@ -142,9 +143,34 @@ financialRouter.get("/overview", async (req, res) => {
 
 financialRouter.get("/payables", async (req, res) => {
   const cid = companyId(req);
+  const indefiniteItems = await prisma.financialPayable.findMany({
+    where: { companyId: cid, recurrenceIndefinite: true, recurrenceGroupId: { not: null } },
+    orderBy: { dueDate: "desc" }
+  });
+  const indefiniteGroups = [...new Map(indefiniteItems.map((item) => [item.recurrenceGroupId, item])).values()];
+  const horizon = addPayableMonths(new Date(), 24);
+  for (const latest of indefiniteGroups) {
+    let dueDate = addPayableMonths(latest.dueDate, 1);
+    let number = latest.installmentNumber + 1;
+    const additions = [];
+    while (dueDate <= horizon) {
+      additions.push(prisma.financialPayable.create({ data: {
+        companyId: cid, description: latest.description, category: latest.category, expenseType: latest.expenseType,
+        supplierName: latest.supplierName, documentNumber: latest.documentNumber, amount: latest.amount, dueDate,
+        competenceMonth: latest.competenceMonth ? addCompetenceMonths(latest.competenceMonth, number - latest.installmentNumber) : null,
+        installmentNumber: number, installmentTotal: 0, recurrenceGroupId: latest.recurrenceGroupId, recurrenceIndefinite: true,
+        notes: latest.notes, createdById: req.user?.userId, updatedById: req.user?.userId
+      } }));
+      dueDate = addPayableMonths(dueDate, 1); number += 1;
+    }
+    if (additions.length) await prisma.$transaction(additions);
+  }
   const status = String(req.query.status ?? "OPEN");
   const where: any = { companyId: cid };
   if (["OPEN", "PAID", "CANCELLED"].includes(status)) where.status = status;
+  const from = typeof req.query.from === "string" ? payableDate(req.query.from) : null;
+  const to = typeof req.query.to === "string" ? payableDate(req.query.to) : null;
+  if (from || to) where.dueDate = { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) };
   const items = await prisma.financialPayable.findMany({ where, include: { paidFromAccount: { select: { id: true, name: true } } }, orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }] });
   res.json(items);
 });
@@ -152,14 +178,15 @@ financialRouter.get("/payables", async (req, res) => {
 financialRouter.post("/payables", async (req, res) => {
   const cid = companyId(req);
   const body = payableSchema.parse(req.body);
-  const total = body.recurring ? body.repeatMonths : 1;
+  if (body.indefinite && body.category !== "PAYROLL") return res.status(400).json({ message: "A opção sem data de término está disponível para salários." });
+  const total = body.indefinite ? 24 : body.recurring ? body.repeatMonths : 1;
   const groupId = total > 1 ? randomUUID() : null;
   const firstDueDate = payableDate(body.dueDate);
   const created = await prisma.$transaction(Array.from({ length: total }, (_, index) => prisma.financialPayable.create({ data: {
     companyId: cid, description: body.description, category: body.category, expenseType: body.expenseType,
     supplierName: body.supplierName || null, documentNumber: body.documentNumber || null, amount: body.amount,
     dueDate: addPayableMonths(firstDueDate, index), competenceMonth: body.competenceMonth ? addCompetenceMonths(body.competenceMonth, index) : null,
-    installmentNumber: index + 1, installmentTotal: total, recurrenceGroupId: groupId,
+    installmentNumber: index + 1, installmentTotal: body.indefinite ? 0 : total, recurrenceGroupId: groupId, recurrenceIndefinite: body.indefinite,
     notes: body.notes || null, createdById: req.user?.userId, updatedById: req.user?.userId
   } })));
   res.status(201).json(created);
@@ -167,7 +194,7 @@ financialRouter.post("/payables", async (req, res) => {
 
 financialRouter.patch("/payables/:id", async (req, res) => {
   const cid = companyId(req);
-  const body = payableSchema.partial().omit({ recurring: true, repeatMonths: true }).parse(req.body);
+  const body = payableSchema.partial().omit({ recurring: true, repeatMonths: true, indefinite: true }).parse(req.body);
   const existing = await prisma.financialPayable.findFirst({ where: { id: req.params.id, companyId: cid } });
   if (!existing) return res.status(404).json({ message: "Conta a pagar não encontrada." });
   if (existing.status !== "OPEN") return res.status(400).json({ message: "Somente contas em aberto podem ser editadas." });
