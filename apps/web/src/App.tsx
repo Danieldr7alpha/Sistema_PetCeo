@@ -721,8 +721,9 @@ function Customers() {
   const { data, error, refresh } = useData<Customer[]>(`/customers?q=${encodeURIComponent(q)}`, [q]);
   const [modal, setModal] = useState<"new" | "detail" | "edit" | null>(null);
   const [selected, setSelected] = useState<Customer | null>(null);
+  const [registrationLinkOpen, setRegistrationLinkOpen] = useState(false);
   const customers = data ?? [];
-  return <Page title="Clientes" action={<button className="btn btn-primary" onClick={() => setModal("new")}><Plus size={16} />Adicionar Cliente</button>}>
+  return <Page title="Clientes" action={<div className="grid grid-cols-2 gap-2"><button className="btn btn-secondary" onClick={() => setRegistrationLinkOpen(true)}>Enviar link</button><button className="btn btn-primary" onClick={() => setModal("new")}><Plus size={16} />Adicionar Cliente</button></div>}>
     <div className="panel mb-4 flex items-center gap-2 p-3"><Search size={18} className="text-slate-400" /><input className="w-full bg-transparent text-sm outline-none" placeholder="Buscar por tutor, CPF, pet ou celular" value={q} onChange={(e) => setQ(e.target.value)} /></div>
     {error && <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">Não foi possível carregar os clientes. Verifique se a API está aberta e tente novamente.</div>}
     <div className="panel overflow-hidden">
@@ -732,7 +733,15 @@ function Customers() {
     {modal === "new" && <CustomerForm onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh(); }} />}
     {modal === "edit" && selected && <CustomerForm customerId={selected.id} onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh(); }} />}
     {modal === "detail" && selected && <CustomerDetail id={selected.id} onClose={() => setModal(null)} />}
+    {registrationLinkOpen && <CustomerRegistrationLinkModal onClose={() => setRegistrationLinkOpen(false)} />}
   </Page>;
+}
+
+function CustomerRegistrationLinkModal({ onClose }: { onClose: () => void }) {
+  const [link, setLink] = useState(""); const [loading, setLoading] = useState(false); const [message, setMessage] = useState("");
+  async function generate() { setLoading(true); setMessage(""); try { const result = await api<{ url: string }>("/customers/registration-link", { method: "POST" }); setLink(result.url); } catch (error) { setMessage(error instanceof Error ? error.message : "Não foi possível gerar o link."); } finally { setLoading(false); } }
+  async function copy() { await navigator.clipboard.writeText(link); setMessage("Link copiado."); }
+  return <Modal title="Enviar cadastro para o cliente" onClose={onClose}><div className="grid gap-4"><div className="rounded-xl border border-blue-200 bg-blue-50 p-4"><h3 className="font-semibold text-blue-950">Cadastro pelo próprio cliente</h3><p className="mt-1 text-sm text-blue-800">O link é seguro, vale por 7 dias e só pode ser utilizado uma vez. O CPF será obrigatório.</p></div>{!link ? <button className="btn btn-primary w-full" disabled={loading} onClick={generate}>{loading ? "Gerando link..." : "Gerar link de cadastro"}</button> : <><label className="text-sm font-medium">Link para enviar<input className="field mt-1" readOnly value={link} /></label><div className="grid grid-cols-2 gap-2"><button className="btn btn-secondary" type="button" onClick={copy}>Copiar link</button><button className="btn btn-primary" type="button" onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(`Preencha seu cadastro no CEO Pet AI: ${link}`)}`, "_blank")}>Enviar no WhatsApp</button></div><button className="text-sm font-semibold text-blue-700" type="button" onClick={() => { setLink(""); setMessage(""); }}>Gerar outro link</button></>}{message && <p className={`rounded-lg p-3 text-sm ${message === "Link copiado." ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{message}</p>}</div></Modal>;
 }
 
 function CustomerForm({ customerId, onClose, onSaved }: { customerId?: string; onClose: () => void; onSaved: () => void }) {
