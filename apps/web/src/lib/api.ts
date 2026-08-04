@@ -9,7 +9,7 @@ function reportNetworkFailure() {
 
 export type Session = {
   token: string;
-  user: { id: string; name: string; email: string; role: "ADMIN" | "EMPLOYEE" };
+  user: { id: string; name: string; email: string; role: "ADMIN" | "EMPLOYEE"; permissions?: string[] };
   company: { id: string; name: string };
 };
 

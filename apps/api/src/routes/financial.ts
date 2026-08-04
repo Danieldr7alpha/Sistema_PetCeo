@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { companyId, requireAdmin } from "../middleware/auth.js";
+import { companyId, requirePermission } from "../middleware/auth.js";
 import { prisma } from "../lib/prisma.js";
 
 export const financialRouter = Router();
@@ -116,7 +116,17 @@ financialRouter.get("/payment-methods/active", async (req, res) => {
   res.json(methods);
 });
 
-financialRouter.use(requireAdmin);
+financialRouter.use((req, res, next) => {
+  const permission = req.path.startsWith("/accounts") ? "financial:accounts"
+    : req.path.startsWith("/payment-methods") ? "financial:methods"
+    : req.path.startsWith("/payables") ? "financial:payables"
+    : req.path.startsWith("/receivables") ? "financial:receivables"
+    : req.path.startsWith("/movements") ? "financial:movements"
+    : req.path.startsWith("/reports") ? "financial:reports"
+    : req.path.startsWith("/overview") ? "financial"
+    : "financial";
+  return requirePermission(permission)(req, res, next);
+});
 
 financialRouter.get("/overview", async (req, res) => {
   const cid = companyId(req);
@@ -139,6 +149,65 @@ financialRouter.get("/overview", async (req, res) => {
   const receivable = Number(futureInstallments._sum.netAmount ?? 0) + Number(legacyFuturePayments._sum.netAmount ?? 0) + Number(pendingSales._sum.pendingAmount ?? 0);
   const payable = await prisma.financialPayable.aggregate({ where: { companyId: cid, status: "OPEN" }, _sum: { amount: true } });
   res.json({ payable: Number(payable._sum.amount ?? 0), receivable, fees: Number(fees._sum.feeAmount ?? 0) });
+});
+
+function financialPeriod(req: any, defaultFutureDays = 30) {
+  const start = typeof req.query.from === "string" ? payableDate(req.query.from) : new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = typeof req.query.to === "string" ? payableDate(req.query.to) : new Date(start.getTime() + defaultFutureDays * 86_400_000);
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+}
+
+financialRouter.get("/receivables", async (req, res) => {
+  const cid = companyId(req); const { start, end } = financialPeriod(req, 30); const accountId = typeof req.query.accountId === "string" ? req.query.accountId : undefined;
+  const installmentRows = await prisma.salePaymentInstallment.findMany({
+    where: { expectedSettlementDate: { gte: start, lte: end }, salePayment: { companyId: cid, ...(accountId ? { destinationAccountId: accountId } : {}) } },
+    include: { salePayment: { include: { destinationAccount: { select: { id: true, name: true, institutionName: true } }, sale: { select: { internalCode: true, customer: { select: { name: true } }, receipt: { select: { receiptCode: true } } } } } } },
+    orderBy: { expectedSettlementDate: "asc" }
+  });
+  const legacyRows = await prisma.salePayment.findMany({
+    where: { companyId: cid, expectedSettlementDate: { gte: start, lte: end }, settlementInstallments: { none: {} }, ...(accountId ? { destinationAccountId: accountId } : {}) },
+    include: { destinationAccount: { select: { id: true, name: true, institutionName: true } }, sale: { select: { internalCode: true, customer: { select: { name: true } }, receipt: { select: { receiptCode: true } } } } },
+    orderBy: { expectedSettlementDate: "asc" }
+  });
+  const now = new Date();
+  const items = [
+    ...installmentRows.map((row) => ({ id: row.id, expectedDate: row.expectedSettlementDate, status: row.expectedSettlementDate <= now ? "RECEIVED" : "EXPECTED", installmentNumber: row.installmentNumber, installments: row.salePayment.installments ?? 1, grossAmount: Number(row.grossAmount), feeAmount: Number(row.feeAmount), netAmount: Number(row.netAmount), methodName: row.salePayment.paymentMethodNameSnapshot ?? row.salePayment.method, brand: row.salePayment.cardBrandSnapshot ?? row.salePayment.cardBrand, institution: row.salePayment.institutionNameSnapshot, account: row.salePayment.destinationAccount, saleCode: row.salePayment.sale.internalCode, receiptCode: row.salePayment.sale.receipt?.receiptCode, customerName: row.salePayment.sale.customer?.name, nsu: row.salePayment.cardNsu })),
+    ...legacyRows.map((row) => ({ id: row.id, expectedDate: row.expectedSettlementDate, status: row.expectedSettlementDate! <= now ? "RECEIVED" : "EXPECTED", installmentNumber: 1, installments: row.installments ?? 1, grossAmount: Number(row.grossAmount ?? row.amount), feeAmount: Number(row.feeAmount ?? 0), netAmount: Number(row.netAmount ?? row.amount), methodName: row.paymentMethodNameSnapshot ?? row.method, brand: row.cardBrandSnapshot ?? row.cardBrand, institution: row.institutionNameSnapshot, account: row.destinationAccount, saleCode: row.sale.internalCode, receiptCode: row.sale.receipt?.receiptCode, customerName: row.sale.customer?.name, nsu: row.cardNsu }))
+  ].sort((a, b) => new Date(a.expectedDate!).getTime() - new Date(b.expectedDate!).getTime());
+  const filtered = req.query.status === "EXPECTED" ? items.filter((item) => item.status === "EXPECTED") : req.query.status === "RECEIVED" ? items.filter((item) => item.status === "RECEIVED") : items;
+  res.json({ items: filtered, summary: { gross: filtered.reduce((sum, item) => sum + item.grossAmount, 0), fees: filtered.reduce((sum, item) => sum + item.feeAmount, 0), net: filtered.reduce((sum, item) => sum + item.netAmount, 0), count: filtered.length }, from: start, to: end });
+});
+
+financialRouter.get("/movements", async (req, res) => {
+  const cid = companyId(req); const { start, end } = financialPeriod(req, 30); const accountId = typeof req.query.accountId === "string" ? req.query.accountId : undefined;
+  const [installments, legacy, payables, cashMovements] = await Promise.all([
+    prisma.salePaymentInstallment.findMany({ where: { expectedSettlementDate: { gte: start, lte: new Date(Math.min(end.getTime(), Date.now())) }, salePayment: { companyId: cid, ...(accountId ? { destinationAccountId: accountId } : {}) } }, include: { salePayment: { include: { destinationAccount: { select: { id: true, name: true } }, sale: { select: { internalCode: true } } } } } }),
+    prisma.salePayment.findMany({ where: { companyId: cid, expectedSettlementDate: { gte: start, lte: new Date(Math.min(end.getTime(), Date.now())) }, settlementInstallments: { none: {} }, ...(accountId ? { destinationAccountId: accountId } : {}) }, include: { destinationAccount: { select: { id: true, name: true } }, sale: { select: { internalCode: true } } } }),
+    prisma.financialPayable.findMany({ where: { companyId: cid, status: "PAID", paidAt: { gte: start, lte: end }, ...(accountId ? { paidFromAccountId: accountId } : {}) }, include: { paidFromAccount: { select: { id: true, name: true } } } }),
+    accountId ? Promise.resolve([]) : prisma.cashMovement.findMany({ where: { companyId: cid, createdAt: { gte: start, lte: end } }, include: { cashSession: { select: { cashRegister: { select: { name: true } } } } } })
+  ]);
+  const items: any[] = [
+    ...installments.map((row) => ({ id: `ri-${row.id}`, date: row.expectedSettlementDate, direction: "IN", type: "RECEIPT", description: `${row.salePayment.paymentMethodNameSnapshot ?? row.salePayment.method} · Venda ${row.salePayment.sale.internalCode ?? "-"} · Parcela ${row.installmentNumber}/${row.salePayment.installments ?? 1}`, amount: Number(row.netAmount), grossAmount: Number(row.grossAmount), feeAmount: Number(row.feeAmount), account: row.salePayment.destinationAccount?.name ?? "Sem banco" })),
+    ...legacy.map((row) => ({ id: `rl-${row.id}`, date: row.expectedSettlementDate, direction: "IN", type: "RECEIPT", description: `${row.paymentMethodNameSnapshot ?? row.method} · Venda ${row.sale.internalCode ?? "-"}`, amount: Number(row.netAmount ?? row.amount), grossAmount: Number(row.grossAmount ?? row.amount), feeAmount: Number(row.feeAmount ?? 0), account: row.destinationAccount?.name ?? "Sem banco" })),
+    ...payables.map((row) => ({ id: `p-${row.id}`, date: row.paidAt, direction: "OUT", type: "PAYABLE", description: row.description, amount: Number(row.paidAmount ?? row.amount), feeAmount: Number(row.interestAmount ?? 0), account: row.paidFromAccount?.name ?? "Sem conta" })),
+    ...cashMovements.map((row: any) => ({ id: `c-${row.id}`, date: row.createdAt, direction: ["CASH_IN", "TRANSFER_IN", "ADJUSTMENT"].includes(row.type) ? "IN" : "OUT", type: "CASH", description: row.reason, amount: Number(row.amount), feeAmount: 0, account: row.cashSession.cashRegister?.name ?? "Caixa" }))
+  ];
+  items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  res.json({ items, summary: { incoming: items.filter((item) => item.direction === "IN").reduce((sum, item) => sum + item.amount, 0), outgoing: items.filter((item) => item.direction === "OUT").reduce((sum, item) => sum + item.amount, 0), balance: items.reduce((sum, item) => sum + (item.direction === "IN" ? item.amount : -item.amount), 0) }, from: start, to: end });
+});
+
+financialRouter.get("/reports", async (req, res) => {
+  const cid = companyId(req); const { start, end } = financialPeriod(req, 30);
+  const [payments, payables, openPayables] = await Promise.all([
+    prisma.salePayment.findMany({ where: { companyId: cid, paidAt: { gte: start, lte: end } }, select: { method: true, paymentMethodNameSnapshot: true, grossAmount: true, amount: true, feeAmount: true, netAmount: true, destinationAccount: { select: { name: true } } } }),
+    prisma.financialPayable.findMany({ where: { companyId: cid, status: "PAID", paidAt: { gte: start, lte: end } }, select: { category: true, paidAmount: true, interestAmount: true, paidFromAccount: { select: { name: true } } } }),
+    prisma.financialPayable.aggregate({ where: { companyId: cid, status: "OPEN", dueDate: { gte: start, lte: end } }, _sum: { amount: true }, _count: true })
+  ]);
+  const gross = payments.reduce((sum, item) => sum + Number(item.grossAmount ?? item.amount), 0); const fees = payments.reduce((sum, item) => sum + Number(item.feeAmount ?? 0), 0); const net = payments.reduce((sum, item) => sum + Number(item.netAmount ?? item.amount), 0); const expenses = payables.reduce((sum, item) => sum + Number(item.paidAmount ?? 0), 0);
+  const group = (values: any[], keyOf: (item: any) => string, amountOf: (item: any) => number) => [...values.reduce((map, item) => { const key = keyOf(item); map.set(key, (map.get(key) ?? 0) + amountOf(item)); return map; }, new Map<string, number>())].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total);
+  res.json({ summary: { gross, fees, net, expenses, result: net - expenses, openPayables: Number(openPayables._sum.amount ?? 0), openPayablesCount: openPayables._count }, byPaymentMethod: group(payments, (item) => item.paymentMethodNameSnapshot ?? item.method, (item) => Number(item.netAmount ?? item.amount)), byIncomeAccount: group(payments, (item) => item.destinationAccount?.name ?? "Sem banco", (item) => Number(item.netAmount ?? item.amount)), byExpenseCategory: group(payables, (item) => item.category, (item) => Number(item.paidAmount ?? 0)), byExpenseAccount: group(payables, (item) => item.paidFromAccount?.name ?? "Sem conta", (item) => Number(item.paidAmount ?? 0)), from: start, to: end });
 });
 
 financialRouter.get("/payables", async (req, res) => {

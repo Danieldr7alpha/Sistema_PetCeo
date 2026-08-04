@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import type { Request } from "express";
-import { companyId } from "../middleware/auth.js";
+import { companyId, requirePermission } from "../middleware/auth.js";
 import { prisma } from "../lib/prisma.js";
 
 export const cashRouter = Router();
@@ -126,11 +126,23 @@ function routeError(error: unknown, res: import("express").Response) {
   return res.status(statusCode || 500).json({ message });
 }
 
-async function openCashSession(cid: string) {
+async function allowedRegisterIds(cid: string, userId?: string) {
+  if (!userId) return [];
+  const user = await prisma.user.findFirst({ where: { id: userId, companyId: cid }, select: { role: true, cashRegisterAccess: { select: { cashRegisterId: true } } } });
+  if (user?.role === "ADMIN") {
+    let registers = await prisma.cashRegister.findMany({ where: { companyId: cid, active: true }, select: { id: true } });
+    if (!registers.length) { const created = await prisma.cashRegister.create({ data: { companyId: cid, code: "101", name: "Caixa 101" }, select: { id: true } }); registers = [created]; await prisma.cashSession.updateMany({ where: { companyId: cid, cashRegisterId: null }, data: { cashRegisterId: created.id } }); }
+    return registers.map((item) => item.id);
+  }
+  return user?.cashRegisterAccess.map((item) => item.cashRegisterId) ?? [];
+}
+
+async function openCashSession(cid: string, userId?: string, cashRegisterId?: string) {
   await ensureCashSessionCodes(cid);
+  const allowed = await allowedRegisterIds(cid, userId);
   return prisma.cashSession.findFirst({
-    where: { companyId: cid, status: "OPEN" },
-    include: { movements: { orderBy: { createdAt: "desc" } } },
+    where: { companyId: cid, status: "OPEN", cashRegisterId: cashRegisterId ? cashRegisterId : { in: allowed } },
+    include: { movements: { orderBy: { createdAt: "desc" } }, cashRegister: true },
     orderBy: { openedAt: "desc" }
   });
 }
@@ -275,25 +287,37 @@ async function cashReportSummary(req: Request, res: import("express").Response) 
 
 cashRouter.get("/current", async (req, res) => {
   const cid = companyId(req);
-  const session = await openCashSession(cid);
-  const previous = await prisma.cashSession.findFirst({ where: { companyId: cid, status: "CLOSED" }, orderBy: { closedAt: "desc" } });
-  res.json({ session, hasPreviousSession: Boolean(previous), openingBalance: previous ? Number(previous.closingCashAmount ?? 0) : 0 });
+  const registerId = typeof req.query.cashRegisterId === "string" ? req.query.cashRegisterId : undefined;
+  const session = await openCashSession(cid, req.user?.userId, registerId);
+  const selectedRegisterId = session?.cashRegisterId ?? registerId;
+  const previous = await prisma.cashSession.findFirst({ where: { companyId: cid, cashRegisterId: selectedRegisterId, status: "CLOSED" }, orderBy: { closedAt: "desc" } });
+  const register = selectedRegisterId ? await prisma.cashRegister.findFirst({ where: { id: selectedRegisterId, companyId: cid } }) : null;
+  res.json({ session, hasPreviousSession: Boolean(previous), openingBalance: previous ? Number(previous.closingCashAmount ?? 0) : Number(register?.initialBalance ?? 0) });
+});
+
+cashRouter.get("/registers", async (req, res) => {
+  const cid = companyId(req); const allowed = await allowedRegisterIds(cid, req.user?.userId);
+  res.json(await prisma.cashRegister.findMany({ where: { companyId: cid, active: true, id: { in: allowed } }, orderBy: { code: "asc" } }));
 });
 
 cashRouter.post("/open", async (req, res) => {
   const cid = companyId(req);
-  const body = z.object({ openingAmount: z.coerce.number().nonnegative().default(0), notes: z.string().optional() }).parse(req.body);
-  const current = await openCashSession(cid);
-  if (current) return res.status(409).json({ message: "Já existe um caixa aberto." });
-  const previous = await prisma.cashSession.findFirst({ where: { companyId: cid, status: "CLOSED" }, orderBy: { closedAt: "desc" } });
-  const openingAmount = previous ? Number(previous.closingCashAmount ?? 0) : body.openingAmount;
+  const body = z.object({ openingAmount: z.coerce.number().nonnegative().default(0), cashRegisterId: z.string().min(1) }).parse(req.body);
+  const allowed = await allowedRegisterIds(cid, req.user?.userId);
+  const register = allowed.includes(body.cashRegisterId) ? await prisma.cashRegister.findFirst({ where: { id: body.cashRegisterId, companyId: cid, active: true } }) : null;
+  if (!register) return res.status(403).json({ message: "Você não possui autorização para utilizar este caixa." });
+  const current = await openCashSession(cid, req.user?.userId, register.id);
+  if (current) return res.status(409).json({ message: "Este caixa já está aberto." });
+  const previous = await prisma.cashSession.findFirst({ where: { companyId: cid, cashRegisterId: register.id, status: "CLOSED" }, orderBy: { closedAt: "desc" } });
+  const openingAmount = previous ? Number(previous.closingCashAmount ?? 0) : Number(register.initialBalance ?? body.openingAmount);
   const operator = await operatorData(req);
   const session = await prisma.cashSession.create({
     data: {
       companyId: cid,
+      cashRegisterId: register.id,
       internalCode: await nextCashSessionCode(cid),
       openingAmount,
-      notes: body.notes,
+      notes: register.name,
       openedById: operator.operatorId,
       openedByName: operator.operatorName
     },
@@ -302,7 +326,7 @@ cashRouter.post("/open", async (req, res) => {
   res.status(201).json(session);
 });
 
-cashRouter.get("/reports/summary", cashReportSummary);
+cashRouter.get("/reports/summary", requirePermission("checkout:reports"), cashReportSummary);
 
 cashRouter.get("/pre-sales", async (req, res) => {
   const cid = companyId(req);
@@ -412,7 +436,11 @@ cashRouter.get("/:id/summary", async (req, res) => {
   res.json(summary);
 });
 
-cashRouter.post("/:id/movements", async (req, res) => {
+cashRouter.post("/:id/movements", (req, res, next) => {
+  const type = String(req.body?.type ?? "");
+  const permission = type === "CASH_OUT" ? "checkout:withdrawal" : type === "CASH_IN" ? "checkout:supply" : type.includes("TRANSFER") ? "checkout:transfer" : "checkout:consumption";
+  return requirePermission(permission)(req, res, next);
+}, async (req, res) => {
   const cid = companyId(req);
   const body = z.object({
     type: z.enum(["CASH_IN", "CASH_OUT", "EXPENSE", "TRANSFER_IN", "TRANSFER_OUT", "ADJUSTMENT"]),
@@ -449,7 +477,7 @@ cashRouter.post("/:id/movements", async (req, res) => {
   res.status(201).json(movement);
 });
 
-cashRouter.post("/:id/close", async (req, res) => {
+cashRouter.post("/:id/close", requirePermission("checkout:close"), async (req, res) => {
   const cid = companyId(req);
   const body = z.object({ countedCashAmount: z.coerce.number().nonnegative(), differenceReason: z.string().optional(), adminPassword: z.string().optional() }).parse(req.body);
   if (!(await validateAdminPassword(cid, body.adminPassword))) {
@@ -480,7 +508,7 @@ cashRouter.post("/:id/close", async (req, res) => {
 });
 
 /*
-cashRouter.get("/reports/summary", async (req, res) => {
+cashRouter.get("/reports/summary", requirePermission("checkout:reports"), async (req, res) => {
   if (req.user?.role !== "ADMIN") return res.status(403).json({ message: "Você não possui permissão para executar esta ação." });
   const cid = companyId(req);
   const { from, to } = periodFromQuery(req);

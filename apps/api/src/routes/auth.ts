@@ -107,12 +107,12 @@ authRouter.post("/register", async (req, res) => {
 authRouter.post("/login", async (req, res) => {
   const body = z.object({ email: z.string().email().transform(normalizeEmail), password: z.string().min(1) }).parse(req.body);
   const user = await prisma.user.findUnique({ where: { email: body.email }, include: { company: true } });
-  if (!user || !(await bcrypt.compare(body.password, user.passwordHash))) {
+  if (!user || !user.active || !(await bcrypt.compare(body.password, user.passwordHash))) {
     return res.status(401).json({ message: "E-mail ou senha inválidos" });
   }
 
   const token = jwt.sign({ userId: user.id, companyId: user.companyId, role: user.role }, process.env.JWT_SECRET ?? "dev-secret", { expiresIn: "7d" });
-  res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role }, company: user.company });
+  res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, permissions: user.permissions }, company: user.company });
 });
 
 authRouter.post("/forgot-password", async (req, res) => {

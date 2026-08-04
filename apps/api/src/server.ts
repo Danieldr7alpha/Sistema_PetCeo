@@ -5,7 +5,7 @@ import express from "express";
 import { ZodError } from "zod";
 import { Prisma } from "@prisma/client";
 import { authRouter } from "./routes/auth.js";
-import { requireAuth } from "./middleware/auth.js";
+import { requireAuth, requirePermission } from "./middleware/auth.js";
 import { dashboardRouter } from "./routes/dashboard.js";
 import { customersRouter } from "./routes/customers.js";
 import { catalogRouter } from "./routes/catalog.js";
@@ -14,6 +14,7 @@ import { membershipsRouter } from "./routes/memberships.js";
 import { salesRouter } from "./routes/sales.js";
 import { cashRouter } from "./routes/cash.js";
 import { financialRouter } from "./routes/financial.js";
+import { managementRouter } from "./routes/management.js";
 import { prisma } from "./lib/prisma.js";
 
 export const app = express();
@@ -29,7 +30,8 @@ const allowedOrigins = new Set(
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+      const isLocalDevelopment = Boolean(origin && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin));
+      if (!origin || allowedOrigins.has(origin) || isLocalDevelopment) return callback(null, true);
       return callback(null, false);
     }
   })
@@ -47,14 +49,15 @@ app.get("/health", async (_req, res) => {
   }
 });
 app.use("/auth", authRouter);
-app.use("/dashboard", requireAuth, dashboardRouter);
-app.use("/customers", requireAuth, customersRouter);
-app.use("/catalog", requireAuth, catalogRouter);
-app.use("/appointments", requireAuth, appointmentsRouter);
-app.use("/memberships", requireAuth, membershipsRouter);
-app.use("/sales", requireAuth, salesRouter);
-app.use("/cash", requireAuth, cashRouter);
-app.use("/financial", requireAuth, financialRouter);
+app.use("/dashboard", requireAuth, requirePermission("dashboard"), dashboardRouter);
+app.use("/customers", requireAuth, requirePermission("customers"), customersRouter);
+app.use("/catalog", requireAuth, requirePermission("products"), catalogRouter);
+app.use("/appointments", requireAuth, requirePermission("appointments"), appointmentsRouter);
+app.use("/memberships", requireAuth, requirePermission("memberships"), membershipsRouter);
+app.use("/sales", requireAuth, requirePermission("checkout"), salesRouter);
+app.use("/cash", requireAuth, requirePermission("checkout"), cashRouter);
+app.use("/financial", requireAuth, requirePermission("financial"), financialRouter);
+app.use("/management", requireAuth, managementRouter);
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (error instanceof ZodError) return res.status(400).json({ message: "Dados invalidos", issues: error.issues });
