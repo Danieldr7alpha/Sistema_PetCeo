@@ -18,8 +18,6 @@ const cashSubmenus = [
   { key: "checkout:pending", label: "Pedidos Pendentes" },
   { key: "checkout:reports", label: "Relatório" },
   { key: "checkout:closing-reports", label: "Relatórios de fechamento" },
-  { key: "checkout:withdrawal", label: "Sangria" },
-  { key: "checkout:supply", label: "Suprimento" },
   { key: "checkout:transfer", label: "Transferência" },
   { key: "checkout:consumption", label: "Consumo" },
   { key: "checkout:close", label: "Fechar Caixa" }

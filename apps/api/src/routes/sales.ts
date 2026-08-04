@@ -14,6 +14,19 @@ const saleStatuses = ["WAITING_PAYMENT", "PARTIALLY_PAID", "PENDING", "PAID", "C
 const pendingReasons = ["PIX_LATER", "PAY_ON_PICKUP", "OWED", "CARD_PROBLEM", "PARTIAL_PAYMENT", "OTHER"] as const;
 const receivableStatuses = ["WAITING_PAYMENT", "PENDING", "PARTIALLY_PAID"] as const;
 
+async function repairLegacyReceivableBalances(cid: string) {
+  // Older agenda orders were created with pendingAmount = 0 even though no
+  // payment had been received. Keep those orders visible and collectible.
+  await prisma.$executeRaw`
+    UPDATE "Sale"
+       SET "pendingAmount" = GREATEST("total" - "paidAmount", 0)
+     WHERE "companyId" = ${cid}
+       AND status IN ('WAITING_PAYMENT', 'PENDING', 'PARTIALLY_PAID')
+       AND "pendingAmount" <= 0
+       AND "total" > "paidAmount"
+  `;
+}
+
 const salePaymentSchema = z.object({
   method: z.enum(paymentMethods),
   financialPaymentMethodId: z.string().optional(),
@@ -405,6 +418,63 @@ export async function ensureWaitingSaleForFinishedAppointment(cid: string, appoi
   });
   if (!appointment) return null;
 
+  // Appointments created together share one checkout sale. Wait for every pet
+  // to finish so the operator cannot accidentally charge an incomplete order.
+  if (appointment.orderGroupId) {
+    const groupedAppointments = await prisma.appointment.findMany({
+      where: { companyId: cid, orderGroupId: appointment.orderGroupId, status: { not: "CANCELLED" } },
+      include: { pet: true, service: true, membershipUsage: true, membershipRenewal: { include: { plan: true } }, extraServices: { orderBy: { createdAt: "asc" } } },
+      orderBy: { createdAt: "asc" }
+    });
+    const existingGroupSale = await prisma.sale.findFirst({
+      where: { companyId: cid, groupedAppointments: { some: { orderGroupId: appointment.orderGroupId } } }
+    });
+    if (existingGroupSale) return existingGroupSale;
+    if (groupedAppointments.some((item) => item.status !== "FINISHED")) return null;
+
+    const items = groupedAppointments.flatMap((item) => {
+      const covered = item.paymentMode === "PACKAGE" && item.membershipUsage?.status === "CONSUMED";
+      const renewing = item.paymentMode === "RENEWAL_AT_CHECKOUT" && item.membershipRenewal?.status === "PENDING_PAYMENT";
+      const base = renewing ? Number(item.membershipRenewal?.priceSnapshot ?? 0) : covered ? 0 : Number(item.service.price);
+      const petPrefix = `${item.pet.name} — `;
+      const baseItems = renewing ? [{
+        companyId: cid, itemType: "SERVICE" as const, serviceId: item.serviceId,
+        description: `${petPrefix}Renovação: ${item.membershipRenewal!.plan.name}`,
+        quantity: 1, unitPrice: base, total: base, coveredByMembership: false
+      }, {
+        companyId: cid, itemType: "SERVICE" as const, serviceId: item.serviceId,
+        description: `${petPrefix}${item.service.name} — incluído na renovação`,
+        quantity: 1, unitPrice: 0, total: 0, coveredByMembership: true
+      }] : [{
+        companyId: cid, itemType: "SERVICE" as const, serviceId: item.serviceId,
+        description: `${petPrefix}${item.service.name}`,
+        quantity: 1, unitPrice: base, total: base, coveredByMembership: covered
+      }];
+      return [...baseItems, ...item.extraServices.map((extra) => ({
+        companyId: cid, itemType: "SERVICE" as const, serviceId: extra.serviceId,
+        description: `${petPrefix}${extra.nameSnapshot}`, quantity: 1,
+        unitPrice: Number(extra.priceSnapshot), total: Number(extra.priceSnapshot), coveredByMembership: false
+      }))];
+    });
+    const total = items.reduce((sum, item) => sum + Number(item.total), 0);
+    if (total <= 0) return null;
+    const primary = groupedAppointments[0];
+    const sale = await prisma.$transaction(async (tx) => {
+      const created = await tx.sale.create({ data: {
+        companyId: cid, internalCode: await nextSaleCode(cid), customerId: appointment.customerId,
+        petId: primary.petId, appointmentId: primary.id, origin: "AGENDA", status: "WAITING_PAYMENT",
+        paymentStatus: "PENDING", pendingSince: new Date(), subtotal: total, total, pendingAmount: total,
+        items: { create: items }
+      }});
+      await tx.appointment.updateMany({
+        where: { companyId: cid, orderGroupId: appointment.orderGroupId },
+        data: { checkoutSaleId: created.id }
+      });
+      return created;
+    });
+    return sale;
+  }
+
   const coveredByMembership = appointment.paymentMode === "PACKAGE" && appointment.membershipUsage?.status === "CONSUMED";
   const renewalAtCheckout = appointment.paymentMode === "RENEWAL_AT_CHECKOUT" && appointment.membershipRenewal?.status === "PENDING_PAYMENT";
   const baseTotal = renewalAtCheckout ? Number(appointment.membershipRenewal?.priceSnapshot ?? 0) : coveredByMembership ? 0 : Number(appointment.service.price);
@@ -500,6 +570,7 @@ export async function ensureWaitingSaleForFinishedAppointment(cid: string, appoi
         pendingSince: new Date(),
         subtotal: total,
         total,
+        pendingAmount: total,
         items: {
           create: saleItems
         }
@@ -829,7 +900,11 @@ async function processMembershipUseOnce(cid: string, saleId: string, membershipI
 
 async function updateAppointmentPayment(cid: string, appointmentId: string | null | undefined, status: typeof saleStatuses[number], db: any = prisma) {
   if (!appointmentId) return;
-  await db.appointment.updateMany({ where: { id: appointmentId, companyId: cid }, data: { paymentStatus: salePaymentStatus(status) } });
+  const appointment = await db.appointment.findFirst({ where: { id: appointmentId, companyId: cid }, select: { orderGroupId: true } });
+  await db.appointment.updateMany({
+    where: appointment?.orderGroupId ? { companyId: cid, orderGroupId: appointment.orderGroupId } : { id: appointmentId, companyId: cid },
+    data: { paymentStatus: salePaymentStatus(status) }
+  });
 }
 
 function sanitizePayload(value: unknown): unknown {
@@ -935,6 +1010,7 @@ salesRouter.get("/", async (req, res) => {
 salesRouter.get("/receivable/search", async (req, res) => {
   const cid = companyId(req);
   await ensureWaitingSalesForFinishedAppointments(cid);
+  await repairLegacyReceivableBalances(cid);
   await ensureSaleCodes(cid);
   const q = String(req.query.q ?? "").trim().slice(0, 100);
   const qDigits = onlyDigits(q);
@@ -1014,6 +1090,7 @@ salesRouter.get("/receivable/search", async (req, res) => {
 salesRouter.get("/by-code/:code/receivable", async (req, res) => {
   const cid = companyId(req);
   await ensureWaitingSalesForFinishedAppointments(cid);
+  await repairLegacyReceivableBalances(cid);
   await ensureSaleCodes(cid);
   const digits = onlyDigits(req.params.code);
   const internalCode = digits ? Number(digits) : 0;

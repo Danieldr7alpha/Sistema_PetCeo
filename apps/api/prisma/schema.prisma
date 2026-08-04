@@ -629,6 +629,8 @@ model Appointment {
   paymentStatus     PaymentStatus             @default(PENDING)
   paymentMode       AppointmentPaymentMode    @default(AVULSO)
   membershipId      String?
+  orderGroupId      String?
+  checkoutSaleId    String?
   createdAt         DateTime                  @default(now())
   updatedAt         DateTime                  @updatedAt
   customer          Customer                  @relation(fields: [customerId], references: [id])
@@ -639,8 +641,11 @@ model Appointment {
   membershipRenewal MembershipRenewal?
   extraServices     AppointmentExtraService[]
   sales             Sale[]
+  checkoutSale      Sale?                     @relation("AppointmentCheckoutSale", fields: [checkoutSaleId], references: [id])
 
   @@index([companyId, membershipId])
+  @@index([companyId, orderGroupId])
+  @@index([checkoutSaleId])
 }
 
 model AppointmentExtraService {
@@ -754,6 +759,7 @@ model Sale {
   payments            SalePayment[]
   receipt             SalesReceipt?
   membershipPurchase  CustomerMembership? @relation("MembershipPurchaseSale")
+  groupedAppointments Appointment[]        @relation("AppointmentCheckoutSale")
 
   @@unique([companyId, internalCode])
   @@unique([companyId, appointmentId])

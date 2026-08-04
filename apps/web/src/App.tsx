@@ -25,7 +25,8 @@ type Product = { id: string; internalCode?: number; catalogCode?: number; legacy
 type MembershipUsage = { id: string; status: "RESERVED" | "CONSUMED" | "RELEASED"; usageNumber?: number | null; balanceBefore: number; balanceAfter?: number | null; reservedAt: string; consumedAt?: string | null; releasedAt?: string | null };
 type MembershipRenewal = { id: string; status: "PENDING_PAYMENT" | "PAID" | "CANCELLED"; priceSnapshot: number | string; plan: Plan; membershipId?: string | null };
 type AppointmentExtraService = { id: string; serviceId: string; nameSnapshot: string; priceSnapshot: number | string; service?: Service };
-type Appointment = { id: string; date: string; startTime: string; endTime?: string; notes?: string; status: string; paymentStatus: string; paymentMode?: "AVULSO" | "PACKAGE" | "RENEWAL_AT_CHECKOUT"; membershipId?: string | null; membership?: Membership | null; membershipUsage?: MembershipUsage | null; membershipRenewal?: MembershipRenewal | null; extraServices?: AppointmentExtraService[]; customer: Customer; pet: Pet; service: Service; sales?: { id: string; internalCode?: number; status?: string; total?: number | string; pendingAmount?: number | string }[] };
+type AppointmentOrder = { id: string; internalCode?: number; status?: string; total?: number | string; pendingAmount?: number | string };
+type Appointment = { id: string; date: string; startTime: string; endTime?: string; notes?: string; status: string; paymentStatus: string; paymentMode?: "AVULSO" | "PACKAGE" | "RENEWAL_AT_CHECKOUT"; membershipId?: string | null; orderGroupId?: string | null; membership?: Membership | null; membershipUsage?: MembershipUsage | null; membershipRenewal?: MembershipRenewal | null; extraServices?: AppointmentExtraService[]; customer: Customer; pet: Pet; service: Service; sales?: AppointmentOrder[]; checkoutSale?: AppointmentOrder | null };
 type Plan = { id: string; name: string; usageQuantity: number; validityDays: number; suggestedFrequencyDays: number; price: string; active: boolean; service: Service };
 type Membership = { id: string; startDate: string; endDate: string; totalUses: number; remainingUses: number; usedUses: number; status: string; preferredWeekday?: number | null; preferredTime?: string | null; purchaseSale?: { id: string; internalCode?: number | null; status: SaleStatus } | null; customer: Customer; pet: Pet; plan: Plan; usages?: { id: string }[]; reservedUses?: number; availableUses?: number; usable?: boolean; unavailableReason?: "EXPIRED" | "INACTIVE" | "PENDING_PAYMENT" | "NO_BALANCE" | null };
 type SaleStatus = "WAITING_PAYMENT" | "PARTIALLY_PAID" | "PENDING" | "PAID" | "CANCELLED" | "REFUNDED";
@@ -40,6 +41,17 @@ type ReceiptDetailSale = Sale & { cashSession?: CashSession | null };
 type ReceivableSalesPage = { items: Sale[]; page: number; pageSize: number; total: number; totalPages: number; summary?: { total: number; paid: number; pending: number } };
 type OrderNotice = { title: string; message: string; details?: string[]; notFound?: boolean };
 type SaleItemForm = { itemType: "SERVICE" | "PRODUCT"; serviceId?: string | null; productId?: string | null; description: string; quantity: number; unitPrice: number; code?: string; coveredByMembership?: boolean };
+
+function formatMoneyInput(value: string | number) {
+  const cents = typeof value === "number"
+    ? Math.round(value * 100)
+    : Number(String(value).replace(/\D/g, "") || 0);
+  return (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function moneyInputNumber(value: string) {
+  return Number(value.replace(/\D/g, "") || 0) / 100;
+}
 
 function normalizeSaleItemPayload(item: SaleItemForm) {
   if (item.itemType === "SERVICE" && item.serviceId) {
@@ -77,7 +89,7 @@ type FinancialPaymentMethod = { id: string; name: string; type: "CASH" | "PIX" |
 type FinancialPayable = { id: string; description: string; category: string; expenseType: "FIXED" | "VARIABLE"; supplierName?: string | null; documentNumber?: string | null; amount: number | string; dueDate: string; competenceMonth?: string | null; installmentNumber: number; installmentTotal: number; recurrenceIndefinite?: boolean; status: "OPEN" | "PAID" | "CANCELLED"; paidAmount?: number | string | null; interestAmount?: number | string | null; paidAt?: string | null; paymentMethod?: string | null; receiptFileName?: string | null; receiptMimeType?: string | null; receiptData?: string | null; paidFromAccount?: { id: string; name: string } | null; notes?: string | null };
 type FinancialReceivable = { id: string; expectedDate: string; status: "EXPECTED" | "RECEIVED"; installmentNumber: number; installments: number; grossAmount: number; feeAmount: number; netAmount: number; methodName: string; brand?: string | null; institution?: string | null; account?: { id: string; name: string; institutionName?: string | null } | null; saleCode?: number | null; receiptCode?: number | null; customerName?: string | null; nsu?: string | null };
 type FinancialMovement = { id: string; date: string; direction: "IN" | "OUT"; type: "RECEIPT" | "PAYABLE" | "CASH"; description: string; amount: number; grossAmount?: number; feeAmount?: number; account: string };
-type FinancialReport = { summary: { gross: number; fees: number; net: number; expenses: number; result: number; openPayables: number; openPayablesCount: number }; byPaymentMethod: { name: string; total: number }[]; byIncomeAccount: { name: string; total: number }[]; byExpenseCategory: { name: string; total: number }[]; byExpenseAccount: { name: string; total: number }[] };
+type FinancialReport = { summary: { gross: number; fees: number; net: number; expenses: number; result: number; openPayables: number; openPayablesCount: number }; byPaymentMethod: { name: string; total: number }[]; byIncomeAccount: { name: string; total: number }[]; byExpenseCategory: { name: string; total: number }[]; byExpenseAccount: { name: string; total: number }[]; expenseDetails: { id: string; description: string; supplierName?: string | null; notes?: string | null; documentNumber?: string | null; category: string; amount: number; paidAt: string; paymentMethod?: string | null; accountName: string }[] };
 
 const genderLabels: Record<string, string> = { MALE: "Masculino", FEMALE: "Feminino", OTHER: "Outro", UNINFORMED: "Prefiro não informar" };
 const petStatusLabels: Record<string, string> = { ACTIVE: "Ativo", INACTIVE: "Inativo", DECEASED: "Falecido" };
@@ -1309,7 +1321,7 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
 function AppointmentDrawer({ appointment, loadingId, onClose, onMove, onCharge, onRenew, onCancelPackage, onReschedule }: { appointment: Appointment; loadingId: string; onClose: () => void; onMove: (id: string, status: string) => void; onCharge: (appointment: Appointment) => void; onRenew: () => void; onCancelPackage: () => void; onReschedule: () => void }) {
   const membership = appointment.membership;
   const usage = appointment.membershipUsage;
-  const order = appointment.sales?.[0];
+  const order = appointment.checkoutSale ?? appointment.sales?.[0];
   const coveredByPackage = appointment.paymentMode === "PACKAGE" && usage?.status === "CONSUMED";
   const chargeableTotal = Number(order?.pendingAmount ?? order?.total ?? 0);
   const canCharge = appointment.status === "FINISHED" && !!order && chargeableTotal > 0 && order.status !== "PAID" && order.status !== "CANCELLED";
@@ -1421,6 +1433,7 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
   const [renewalConfirmed, setRenewalConfirmed] = useState(false);
   const [additionalServiceIds, setAdditionalServiceIds] = useState<string[]>([]);
   const [serviceSelectionError, setServiceSelectionError] = useState("");
+  const [otherPetServices, setOtherPetServices] = useState<Record<string, string>>({});
   const activePets = selectedCustomer?.pets.filter((pet) => pet.status === "ACTIVE") ?? [];
   const petId = form.petId || activePets[0]?.id;
   const additionalServices = additionalServiceIds.map((id) => services.find((service) => service.id === id)).filter((service): service is Service => Boolean(service));
@@ -1487,6 +1500,7 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
     setRenewalConfirmed(false);
     setAdditionalServiceIds([]);
     setServiceSelectionError("");
+    setOtherPetServices({});
   }
   function addAdditionalService(serviceId: string) {
     setServiceSelectionError("");
@@ -1540,6 +1554,8 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
     try {
       setSaving(true);
       const selectedMembership = membershipOptions.find((membership) => membership.id === selectedMembershipId);
+      const orderGroupId = Object.keys(otherPetServices).length ? crypto.randomUUID() : undefined;
+      const common = { date: form.date, startTime: form.startTime, endTime: undefined, notes: form.notes, customerId: selectedCustomer.id, orderGroupId };
       await api("/appointments", { method: "POST", body: JSON.stringify({
         ...form,
         serviceId: primaryServiceId,
@@ -1548,8 +1564,15 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
         paymentMode,
         membershipId: paymentMode === "PACKAGE" ? selectedMembershipId : undefined,
         renewalPlanId: paymentMode === "RENEWAL_AT_CHECKOUT" ? selectedMembership?.plan.id : undefined,
-        additionalServiceIds: persistedAdditionalServiceIds
+        additionalServiceIds: persistedAdditionalServiceIds,
+        orderGroupId
       }) });
+      for (const [otherPetId, otherServiceId] of Object.entries(otherPetServices)) {
+        await api("/appointments", { method: "POST", body: JSON.stringify({
+          ...common, petId: otherPetId, serviceId: otherServiceId,
+          paymentMode: "AVULSO", additionalServiceIds: []
+        }) });
+      }
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível salvar o agendamento.");
@@ -1577,7 +1600,17 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
     {selectedCustomer && <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900"><b>{customerCode(selectedCustomer)} — {selectedCustomer.name}</b><p>{formatPhone(selectedCustomer.phone)} · {formatCpf(selectedCustomer.cpf)}</p></div>}
     {selectedCustomer && activePets.length === 0 && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Este cliente ainda não possui pet cadastrado.</p>}
     {selectedCustomer && activePets.length === 1 && <div className="rounded-lg bg-slate-50 p-3 text-sm"><b>Pet:</b> {activePets[0].name}</div>}
-    {selectedCustomer && activePets.length > 1 && <label className="text-sm font-medium text-slate-700">Pet<select className="field mt-1" value={form.petId} onChange={(e) => setForm({ ...form, petId: e.target.value })}>{activePets.map((pet) => <option key={pet.id} value={pet.id}>{pet.name}</option>)}</select></label>}
+    {selectedCustomer && activePets.length > 1 && <label className="text-sm font-medium text-slate-700">Pet<select className="field mt-1" value={form.petId} onChange={(e) => { setForm({ ...form, petId: e.target.value }); setOtherPetServices({}); }}>{activePets.map((pet) => <option key={pet.id} value={pet.id}>{pet.name}</option>)}</select></label>}
+    {selectedCustomer && activePets.length > 1 && <section className="grid gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">
+      <div><b>Agendar mais pets no mesmo pedido</b><p className="text-blue-800">Cada pet terá seu atendimento e valor, mas a cobrança será feita junta em um único comprovante.</p></div>
+      {activePets.filter((pet) => pet.id !== petId).map((pet) => {
+        const selectedService = otherPetServices[pet.id];
+        return <div className="grid gap-2 rounded-md border border-blue-200 bg-white p-3 sm:grid-cols-[auto_1fr] sm:items-center" key={pet.id}>
+          <label className="flex items-center gap-2 font-semibold"><input type="checkbox" checked={selectedService !== undefined} onChange={(event) => setOtherPetServices((current) => { const next = { ...current }; if (event.target.checked) next[pet.id] = services[0]?.id ?? ""; else delete next[pet.id]; return next; })} />{pet.name}</label>
+          {selectedService !== undefined && <select className="field" required value={selectedService} onChange={(event) => setOtherPetServices((current) => ({ ...current, [pet.id]: event.target.value }))}><option value="">Selecione o serviço</option>{services.map((service) => <option key={service.id} value={service.id}>{service.name} — {currency(service.price)}</option>)}</select>}
+        </div>;
+      })}
+    </section>}
     {membershipsLoading && <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">Consultando mensalidades deste pet...</p>}
     {membershipsError && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{membershipsError}</p>}
     {!membershipsLoading && membershipOptions.length > 0 && <section className="grid gap-2">
@@ -1630,7 +1663,7 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
     </section>
     {paymentMode === "PACKAGE" && selectedMembershipId && <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">Uso do pacote será reservado agora e consumido somente ao finalizar o atendimento.</p>}
     {paymentMode === "RENEWAL_AT_CHECKOUT" && selectedMembershipId && <div className="grid gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><p className="font-medium">Este atendimento será realizado com renovação pendente. A renovação será adicionada ao pedido no Caixa após a conclusão do atendimento.</p><label className="flex items-start gap-2"><input className="mt-1" type="checkbox" checked={renewalConfirmed} onChange={(event) => setRenewalConfirmed(event.target.checked)} /><span>Confirmo que o valor do pacote deverá ser cobrado no Caixa ao finalizar.</span></label></div>}
-    {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}<button className="btn btn-primary justify-self-end disabled:opacity-60" disabled={saving || !selectedCustomer || !petId || (paymentMode === "AVULSO" ? !additionalServiceIds.length : !form.serviceId || !selectedMembershipId) || (paymentMode === "RENEWAL_AT_CHECKOUT" && !renewalConfirmed) || isPastDate(form.date)}>{saving ? "Salvando..." : "Salvar"}</button>
+    {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}<button className="btn btn-primary justify-self-end disabled:opacity-60" disabled={saving || !selectedCustomer || !petId || Object.values(otherPetServices).some((id) => !id) || (paymentMode === "AVULSO" ? !additionalServiceIds.length : !form.serviceId || !selectedMembershipId) || (paymentMode === "RENEWAL_AT_CHECKOUT" && !renewalConfirmed) || isPastDate(form.date)}>{saving ? "Salvando..." : "Salvar agendamento"}</button>
   </form></Modal>;
 }
 
@@ -1974,7 +2007,7 @@ function Checkout({ draft, chargeSaleId, onClearDraft, session, sectionPage }: {
   useEffect(() => {
     if (draft) {
       setSection("pos");
-      const orderId = draft.sales?.[0]?.id;
+      const orderId = draft.checkoutSale?.id ?? draft.sales?.[0]?.id;
       if (orderId) {
         void loadSale(orderId);
       }
@@ -2243,7 +2276,7 @@ function CashPointOfSaleLayout({ cashSession, query, setQuery, loadedSale, waiti
     const timer = window.setTimeout(async () => {
       setOrderListLoading(true);
       try {
-        const result = await api<ReceivableSalesPage>(`/sales/receivable/search?period=all&q=${encodeURIComponent(orderSearchQuery.trim())}&page=${orderSearchPage}&limit=15`);
+        const result = await api<ReceivableSalesPage>(`/sales/receivable/search?period=all&status=WAITING_PAYMENT&q=${encodeURIComponent(orderSearchQuery.trim())}&page=${orderSearchPage}&limit=15`);
         if (active) setOrderSearchResult(result);
       } catch {
         if (active) setOrderSearchResult({ items: [], page: 1, pageSize: 15, total: 0, totalPages: 1 });
@@ -2569,7 +2602,6 @@ function CashPointOfSaleLayout({ cashSession, query, setQuery, loadedSale, waiti
       </div>
     </div>
 
-    {!!waitingSales.length && <section className="grid gap-3"><h2 className="font-semibold">Aguardando pagamento</h2><DataCards items={waitingSales.map((sale) => ({ title: saleCode(sale), subtitle: `${sale.customer?.name ?? "Consumidor final"}${sale.pet?.name ? ` | ${sale.pet.name}` : ""}`, meta: `Total: ${currency(sale.total)} | ${dateTimeBR(sale.createdAt)}`, status: saleStatusLabels[sale.status], action: <button className="btn btn-primary" type="button" onClick={() => onOpenSale(sale)}>Receber</button> }))} /></section>}
     {finishedAppointmentCancelOpen && <Modal title="Este atendimento já foi realizado" onClose={() => setFinishedAppointmentCancelOpen(false)}>
       <div className="grid gap-4">
         <p className="text-sm text-slate-700">Este pedido pertence a um atendimento concluído. Ele não pode ser descartado, pois o serviço já foi realizado. Você pode voltar ao Caixa ou registrar o pagamento para depois.</p>
@@ -2985,8 +3017,8 @@ function PayLaterModal({ sale, customer, pet, total, paidBefore, pendingAmount, 
 function CashPendingSales({ onOpenInPos }: { onOpenInPos: (sale: Sale) => void }) {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [period, setPeriod] = useState("today");
-  const [status, setStatus] = useState("");
+  const [period, setPeriod] = useState("all");
+  const [status, setStatus] = useState("PENDING,PARTIALLY_PAID");
   const [reason, setReason] = useState("");
   const [operator, setOperator] = useState("");
   const [from, setFrom] = useState("");
@@ -3030,7 +3062,7 @@ function CashPendingSales({ onOpenInPos }: { onOpenInPos: (sale: Sale) => void }
     <div className={`panel gap-3 p-4 ${filtersOpen ? "grid" : "hidden md:grid"} md:grid-cols-4`}>
       <label className="text-sm font-medium">Período<select className="field mt-1" value={period} onChange={(event) => { setPeriod(event.target.value); setPage(1); }}><option value="today">Hoje</option><option value="week">Esta semana</option><option value="month">Este mês</option><option value="custom">Personalizado</option><option value="all">Todos os pendentes</option></select></label>
       {period === "custom" && <><label className="text-sm font-medium">Data inicial<input className="field mt-1" type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPage(1); }} /></label><label className="text-sm font-medium">Data final<input className="field mt-1" type="date" value={to} onChange={(event) => { setTo(event.target.value); setPage(1); }} /></label></>}
-      <label className="text-sm font-medium">Status<select className="field mt-1" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="">Todos</option><option value="PENDING">Pagar depois</option><option value="PARTIALLY_PAID">Parcialmente pago</option><option value="WAITING_PAYMENT">Aguardando pagamento</option></select></label>
+      <label className="text-sm font-medium">Status<select className="field mt-1" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="PENDING,PARTIALLY_PAID">Pagar depois e parciais</option><option value="PENDING">Pagar depois</option><option value="PARTIALLY_PAID">Parcialmente pago</option></select></label>
       <label className="text-sm font-medium">Motivo<select className="field mt-1" value={reason} onChange={(event) => { setReason(event.target.value); setPage(1); }}><option value="">Todos</option>{Object.entries(pendingReasonLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       <label className="text-sm font-medium">Operador<input className="field mt-1" value={operator} onChange={(event) => { setOperator(event.target.value); setPage(1); }} /></label>
       <label className="text-sm font-medium">Previsão inicial<input className="field mt-1" type="date" value={expectedFrom} onChange={(event) => { setExpectedFrom(event.target.value); setPage(1); }} /></label>
@@ -3802,7 +3834,7 @@ function InfoGrid({ fields }: { fields: (string | undefined | null)[][] }) {
 type TeamUser = { id: string; name: string; email: string; cpf?: string | null; phone?: string | null; jobTitle?: string | null; salary?: number | string | null; otherMonthlyCost?: number | string | null; otherCostDescription?: string | null; zipCode?: string | null; street?: string | null; addressNumber?: string | null; complement?: string | null; neighborhood?: string | null; city?: string | null; state?: string | null; role: "ADMIN" | "EMPLOYEE"; active: boolean; permissions: string[]; cashRegisterAccess: { cashRegisterId: string }[] };
 const permissionGroups = [
   { title: "Principal", items: [["dashboard", "Dashboard"], ["appointments", "Agenda"], ["customers", "Clientes"], ["memberships", "Mensalistas"], ["products", "Produtos"]] },
-  { title: "Caixa", items: [["checkout", "Ponto de venda"], ["checkout:pending", "Pedidos pendentes"], ["checkout:reports", "Relatório"], ["checkout:closing-reports", "Relatórios de fechamento"], ["checkout:withdrawal", "Sangria"], ["checkout:supply", "Suprimento"], ["checkout:transfer", "Transferência"], ["checkout:consumption", "Consumo"], ["checkout:close", "Fechar caixa"]] },
+  { title: "Caixa", items: [["checkout", "Ponto de venda"], ["checkout:pending", "Pedidos pendentes"], ["checkout:reports", "Relatório"], ["checkout:closing-reports", "Relatórios de fechamento"], ["checkout:transfer", "Transferência"], ["checkout:consumption", "Consumo"], ["checkout:close", "Fechar caixa"]] },
   { title: "Financeiro", items: [["financial", "Visão geral"], ["financial:accounts", "Bancos"], ["financial:cash-registers", "Caixas"], ["financial:methods", "Formas de recebimento"], ["financial:receivables", "Recebimentos previstos"], ["financial:payables", "Contas a pagar"], ["financial:movements", "Movimentações"], ["financial:reports", "Relatórios"]] }
 ] as const;
 
@@ -3896,7 +3928,12 @@ function FinancialMovements({ accounts }: { accounts: FinancialAccount[] }) {
 function FinancialReports() {
   const dates = useFinancialDates(true); const { data } = useData<FinancialReport>(`/financial/reports?from=${dates.from}&to=${dates.to}`);
   const lists = [{ title: "Recebimentos por forma", items: data?.byPaymentMethod ?? [] }, { title: "Entradas por banco", items: data?.byIncomeAccount ?? [] }, { title: "Despesas por categoria", items: (data?.byExpenseCategory ?? []).map((item) => ({ ...item, name: payableCategoryLabels[item.name] ?? item.name })) }, { title: "Saídas por conta", items: data?.byExpenseAccount ?? [] }];
-  return <Page title="Relatórios financeiros" action={<button className="btn btn-secondary" type="button" onClick={() => window.print()}>Imprimir relatório</button>}><div className="mb-4 grid gap-3 sm:grid-cols-2"><label className="text-sm font-semibold">Data inicial<input className="field mt-1" type="date" value={dates.from} onChange={(e) => dates.setFrom(e.target.value)} /></label><label className="text-sm font-semibold">Data final<input className="field mt-1" type="date" value={dates.to} onChange={(e) => dates.setTo(e.target.value)} /></label></div><div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">{[["Vendas brutas", data?.summary.gross, "blue"], ["Taxas", data?.summary.fees, "amber"], ["Receita líquida", data?.summary.net, "emerald"], ["Despesas pagas", data?.summary.expenses, "red"], ["Resultado", data?.summary.result, "indigo"], ["Contas em aberto", data?.summary.openPayables, "orange"]].map(([label, value, color]) => <div className={`rounded-xl border border-${color}-200 bg-${color}-50 p-4`} key={String(label)}><p className="text-sm">{label}</p><b className="text-xl">{currency(Number(value ?? 0))}</b></div>)}</div><div className="grid gap-4 lg:grid-cols-2">{lists.map((list) => <section className="panel overflow-hidden" key={list.title}><h3 className="border-b border-slate-200 bg-slate-50 p-4 font-semibold">{list.title}</h3><div className="divide-y divide-slate-100">{list.items.map((item) => <div className="flex justify-between gap-3 p-3 text-sm" key={item.name}><span>{item.name}</span><b>{currency(item.total)}</b></div>)}{!list.items.length && <p className="p-4 text-sm text-slate-500">Sem dados no período.</p>}</div></section>)}</div></Page>;
+  return <Page title="Relatórios financeiros" action={<button className="btn btn-secondary" type="button" onClick={() => window.print()}>Imprimir relatório</button>}>
+    <div className="mb-4 grid gap-3 sm:grid-cols-2"><label className="text-sm font-semibold">Data inicial<input className="field mt-1" type="date" value={dates.from} onChange={(e) => dates.setFrom(e.target.value)} /></label><label className="text-sm font-semibold">Data final<input className="field mt-1" type="date" value={dates.to} onChange={(e) => dates.setTo(e.target.value)} /></label></div>
+    <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">{[["Vendas brutas", data?.summary.gross, "blue"], ["Taxas", data?.summary.fees, "amber"], ["Receita líquida", data?.summary.net, "emerald"], ["Despesas pagas", data?.summary.expenses, "red"], ["Resultado", data?.summary.result, "indigo"], ["Contas em aberto", data?.summary.openPayables, "orange"]].map(([label, value, color]) => <div className={`rounded-xl border border-${color}-200 bg-${color}-50 p-4`} key={String(label)}><p className="text-sm">{label}</p><b className="text-xl">{currency(Number(value ?? 0))}</b></div>)}</div>
+    <div className="grid gap-4 lg:grid-cols-2">{lists.map((list) => <section className="panel overflow-hidden" key={list.title}><h3 className="border-b border-slate-200 bg-slate-50 p-4 font-semibold">{list.title}</h3><div className="divide-y divide-slate-100">{list.items.map((item) => <div className="flex justify-between gap-3 p-3 text-sm" key={item.name}><span>{item.name}</span><b>{currency(item.total)}</b></div>)}{!list.items.length && <p className="p-4 text-sm text-slate-500">Sem dados no período.</p>}</div></section>)}</div>
+    <section className="panel mt-4 overflow-hidden"><div className="border-b border-slate-200 bg-slate-50 p-4"><h3 className="font-semibold">Detalhamento das despesas</h3><p className="mt-1 text-sm text-slate-500">Veja o motivo de cada saída, quem recebeu e de qual conta o valor saiu.</p></div><div className="divide-y divide-slate-100">{(data?.expenseDetails ?? []).map((item) => <div className="grid gap-2 p-4 md:grid-cols-[1fr_auto] md:items-center" key={item.id}><div><b>{item.description}</b>{item.supplierName && <span className="text-slate-700"> · Recebedor: {item.supplierName}</span>}<p className="mt-1 text-sm text-slate-600">{payableCategoryLabels[item.category] ?? item.category} · Conta: {item.accountName} · Pago em {dateBR(item.paidAt)}{item.paymentMethod ? ` · ${item.paymentMethod}` : ""}</p>{item.notes && <p className="mt-1 text-sm text-slate-500">Observação: {item.notes}</p>}{item.documentNumber && <p className="text-xs text-slate-500">Documento: {item.documentNumber}</p>}</div><b className="text-lg text-red-700">-{currency(item.amount)}</b></div>)}{!data?.expenseDetails?.length && <p className="p-4 text-sm text-slate-500">Nenhuma despesa paga no período.</p>}</div></section>
+  </Page>;
 }
 
 function FinancialModule({ sectionPage }: { sectionPage: string }) {
@@ -3974,15 +4011,15 @@ function FinancialPayables({ accounts, onChanged }: { accounts: FinancialAccount
 }
 
 function PayableModal({ payable, onClose, onSaved }: { payable: FinancialPayable | null; onClose: () => void; onSaved: () => void }) {
-  const [form, setForm] = useState({ description: payable?.description ?? "", category: payable?.category ?? "RENT", expenseType: payable?.expenseType ?? "FIXED", supplierName: payable?.supplierName ?? "", documentNumber: payable?.documentNumber ?? "", amount: String(payable?.amount ?? ""), dueDate: payable?.dueDate?.slice(0, 10) ?? localDateInput(), competenceMonth: payable?.competenceMonth ?? localDateInput().slice(0, 7), recurring: false, repeatMonths: "1", indefinite: false, notes: payable?.notes ?? "" });
+  const [form, setForm] = useState({ description: payable?.description ?? "", category: payable?.category ?? "RENT", expenseType: payable?.expenseType ?? "FIXED", supplierName: payable?.supplierName ?? "", documentNumber: payable?.documentNumber ?? "", amount: payable ? formatMoneyInput(Number(payable.amount)) : "", dueDate: payable?.dueDate?.slice(0, 10) ?? localDateInput(), competenceMonth: payable?.competenceMonth ?? localDateInput().slice(0, 7), recurring: false, repeatMonths: "1", indefinite: false, notes: payable?.notes ?? "" });
   const [error, setError] = useState(""); const [saving, setSaving] = useState(false);
-  async function submit(event: React.FormEvent) { event.preventDefault(); setSaving(true); setError(""); try { const installmentTotal = Number(form.repeatMonths); await api(payable ? `/financial/payables/${payable.id}` : "/financial/payables", { method: payable ? "PATCH" : "POST", body: JSON.stringify({ ...form, competenceMonth: form.dueDate.slice(0, 7), amount: Number(form.amount.replace(",", ".")), recurring: form.indefinite || installmentTotal > 1, repeatMonths: installmentTotal }) }); onSaved(); } catch (e) { setError(e instanceof Error ? e.message : "Não foi possível salvar a conta."); } finally { setSaving(false); } }
+  async function submit(event: React.FormEvent) { event.preventDefault(); setSaving(true); setError(""); try { const installmentTotal = Number(form.repeatMonths); await api(payable ? `/financial/payables/${payable.id}` : "/financial/payables", { method: payable ? "PATCH" : "POST", body: JSON.stringify({ ...form, competenceMonth: form.dueDate.slice(0, 7), amount: moneyInputNumber(form.amount), recurring: form.indefinite || installmentTotal > 1, repeatMonths: installmentTotal }) }); onSaved(); } catch (e) { setError(e instanceof Error ? e.message : "Não foi possível salvar a conta."); } finally { setSaving(false); } }
   return <Modal title={payable ? "Editar conta a pagar" : "Nova conta a pagar"} onClose={onClose}><form className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
     <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900 sm:col-span-2">Cadastre a primeira parcela. Se houver mais parcelas, o sistema criará as próximas no mesmo dia dos meses seguintes.</div>
     <label className="text-sm font-semibold sm:col-span-2">Qual é a conta?<input className="field mt-1" required placeholder="Ex.: Aluguel da loja ou compra de shampoos" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
     <label className="text-sm font-semibold">Categoria<select className="field mt-1" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value, indefinite: e.target.value === "PAYROLL" ? form.indefinite : false })}>{Object.entries(payableCategoryLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
     <label className="text-sm font-semibold">Essa conta é<select className="field mt-1" value={form.expenseType} onChange={(e) => setForm({ ...form, expenseType: e.target.value as "FIXED" | "VARIABLE" })}><option value="FIXED">Fixa — acontece regularmente</option><option value="VARIABLE">Variável — acontece ocasionalmente</option></select></label>
-    <label className="text-sm font-semibold">Valor de cada parcela (R$)<input className="field mt-1" required inputMode="decimal" placeholder="0,00" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
+    <label className="text-sm font-semibold">Valor de cada parcela<input className="field mt-1 text-lg font-semibold" required inputMode="numeric" placeholder="R$ 0,00" value={form.amount} onChange={(e) => setForm({ ...form, amount: formatMoneyInput(e.target.value) })} /><span className="mt-1 block text-xs font-normal text-slate-500">O valor é formatado automaticamente em reais.</span></label>
     {!payable && <div><label className="text-sm font-semibold">Quantas parcelas?<input className="field mt-1" required={!form.indefinite} disabled={form.indefinite} type="number" min="1" max="60" value={form.indefinite ? "" : form.repeatMonths} onChange={(e) => setForm({ ...form, repeatMonths: e.target.value })} /><span className="mt-1 block text-xs font-normal text-slate-500">Digite 1 para pagamento único.</span></label>{form.category === "PAYROLL" && <label className="mt-3 flex items-center gap-2 rounded-lg bg-emerald-50 p-3 text-sm font-semibold text-emerald-900"><input type="checkbox" checked={form.indefinite} onChange={(e) => setForm({ ...form, indefinite: e.target.checked })} />Salário sem data de término</label>}</div>}
     <label className="text-sm font-semibold sm:col-span-2">Vencimento da primeira parcela<input className="field mt-1" required type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value, competenceMonth: e.target.value.slice(0, 7) })} /><span className="mt-1 block text-xs font-normal text-slate-500">O sistema usará automaticamente esse mês como referência. As demais parcelas vencerão no mesmo dia dos meses seguintes.</span></label>
     <label className="text-sm font-semibold">Quem vai receber? <span className="font-normal text-slate-500">(opcional)</span><input className="field mt-1" placeholder="Ex.: Imobiliária ou fornecedor" value={form.supplierName} onChange={(e) => setForm({ ...form, supplierName: e.target.value })} /></label>
@@ -4266,7 +4303,7 @@ export function App() {
       dashboard: <Dashboard />,
       customers: <Customers />,
       memberships: <Memberships onCreateCustomer={() => setPage("customers")} onOpenSale={(saleId) => { setCheckoutDraft(null); setCheckoutSaleId(saleId); window.history.replaceState(null, "", `${window.location.pathname}?pedido=${saleId}`); setPage("checkout"); }} />,
-      appointments: <Appointments onRenewMembership={() => setPage("memberships")} onCharge={(appointment) => { const saleId = appointment.sales?.[0]?.id ?? null; setCheckoutDraft(appointment); setCheckoutSaleId(saleId); if (saleId) window.history.replaceState(null, "", `${window.location.pathname}?pedido=${saleId}`); setPage("checkout"); }} />,
+      appointments: <Appointments onRenewMembership={() => setPage("memberships")} onCharge={(appointment) => { const saleId = appointment.checkoutSale?.id ?? appointment.sales?.[0]?.id ?? null; setCheckoutDraft(appointment); setCheckoutSaleId(saleId); if (saleId) window.history.replaceState(null, "", `${window.location.pathname}?pedido=${saleId}`); setPage("checkout"); }} />,
       products: <Catalog isAdmin={session?.user.role === "ADMIN"} />
     })[page] ?? <Dashboard />;
   }, [page, checkoutDraft, checkoutSaleId, session?.user.role, session?.user.permissions]);

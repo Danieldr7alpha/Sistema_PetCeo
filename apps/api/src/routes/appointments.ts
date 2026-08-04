@@ -15,7 +15,8 @@ const appointmentInclude = {
   membershipUsage: true,
   membershipRenewal: { include: { plan: { include: { service: true } } } },
   extraServices: { include: { service: true }, orderBy: { createdAt: "asc" as const } },
-  sales: true
+  sales: true,
+  checkoutSale: true
 };
 
 function localDateInput(date = new Date()) {
@@ -59,6 +60,7 @@ appointmentsRouter.post("/", async (req, res) => {
     endTime: z.string().optional(),
     notes: z.string().optional(),
     renewalPlanId: z.string().optional(),
+    orderGroupId: z.string().max(100).optional(),
     additionalServiceIds: z.array(z.string()).default([])
   }).parse(req.body);
 
@@ -132,7 +134,8 @@ appointmentsRouter.post("/", async (req, res) => {
         date: appointmentDate,
         startTime: body.startTime,
         endTime: body.endTime,
-        notes: body.notes
+        notes: body.notes,
+        orderGroupId: body.orderGroupId
       }
     });
     if (membership) {
