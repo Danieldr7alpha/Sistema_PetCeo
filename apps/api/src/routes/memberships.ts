@@ -6,6 +6,15 @@ import { prisma } from "../lib/prisma.js";
 
 export const membershipsRouter = Router();
 
+async function nextMembershipSaleCode(tx: any, cid: string) {
+  const last = await tx.sale.findFirst({ where: { companyId: cid, internalCode: { not: null } }, orderBy: { internalCode: "desc" }, select: { internalCode: true } });
+  const minimum = (last?.internalCode ?? 0) + 1;
+  const current = await tx.internalCodeCounter.findUnique({ where: { companyId_kind: { companyId: cid, kind: "SALE" } }, select: { nextValue: true } });
+  const nextValue = Math.max(minimum, current?.nextValue ?? 1);
+  await tx.internalCodeCounter.upsert({ where: { companyId_kind: { companyId: cid, kind: "SALE" } }, update: { nextValue: nextValue + 1 }, create: { companyId: cid, kind: "SALE", nextValue: nextValue + 1 } });
+  return nextValue;
+}
+
 membershipsRouter.get("/plans", async (req, res) => {
   res.json(await prisma.membershipPlan.findMany({ where: { companyId: companyId(req) }, include: { service: true }, orderBy: { name: "asc" } }));
 });
@@ -109,17 +118,17 @@ membershipsRouter.get("/", async (req, res) => {
   res.json(await prisma.customerMembership.findMany({
     where: {
       companyId: cid,
-      status: ["ACTIVE", "EXPIRED", "CANCELLED"].includes(status) ? status as "ACTIVE" | "EXPIRED" | "CANCELLED" : undefined,
+      status: ["ACTIVE", "PENDING_PAYMENT", "EXPIRED", "CANCELLED"].includes(status) ? status as "ACTIVE" | "PENDING_PAYMENT" | "EXPIRED" | "CANCELLED" : undefined,
       endDate: status === "EXPIRING" ? { gte: today, lte: inSevenDays } : undefined
     },
-    include: { customer: true, pet: true, plan: { include: { service: true } } },
+    include: { customer: true, pet: true, plan: { include: { service: true } }, purchaseSale: { select: { id: true, internalCode: true, status: true } } },
     orderBy: { endDate: "asc" }
   }));
 });
 
 membershipsRouter.post("/", async (req, res) => {
   const cid = companyId(req);
-  const body = z.object({ customerId: z.string(), petId: z.string(), planId: z.string(), startDate: z.string() }).parse(req.body);
+  const body = z.object({ customerId: z.string(), petId: z.string(), planId: z.string(), preferredWeekday: z.coerce.number().int().min(0).max(6), preferredTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) }).parse(req.body);
   const plan = await prisma.membershipPlan.findFirstOrThrow({ where: { id: body.planId, companyId: cid, active: true } });
   const pet = await prisma.pet.findFirst({ where: { id: body.petId, customerId: body.customerId, companyId: cid } });
   if (!pet) return res.status(404).json({ message: "Cliente ou pet não encontrado" });
@@ -129,31 +138,102 @@ membershipsRouter.post("/", async (req, res) => {
       customerId: body.customerId,
       petId: body.petId,
       planId: body.planId,
-      status: "ACTIVE"
+      status: { in: ["ACTIVE", "PENDING_PAYMENT"] }
     }
   });
   if (activeMembership) {
-    return res.status(409).json({ message: "Este cliente já possui uma mensalidade ativa para este plano." });
+    return res.status(409).json({ message: activeMembership.status === "PENDING_PAYMENT" ? "Já existe um pedido aguardando pagamento para este plano." : "Este cliente já possui uma mensalidade ativa para este plano." });
   }
-  const startDate = new Date(body.startDate);
-  const endDate = new Date(startDate.getTime() + plan.validityDays * 24 * 60 * 60 * 1000);
-  const membership = await prisma.customerMembership.create({
-    data: {
-      companyId: cid,
-      customerId: body.customerId,
-      petId: body.petId,
-      planId: body.planId,
-      startDate,
-      endDate,
-      totalUses: plan.usageQuantity,
-      remainingUses: plan.usageQuantity
-    },
-    include: { customer: true, pet: true, plan: { include: { service: true } } }
+  const now = new Date(); const provisionalEnd = new Date(now.getTime() + plan.validityDays * 86_400_000);
+  const result = await prisma.$transaction(async (tx) => {
+    const sale = await tx.sale.create({ data: {
+      companyId: cid, internalCode: await nextMembershipSaleCode(tx, cid), customerId: body.customerId, petId: body.petId,
+      origin: "DIRECT", status: "WAITING_PAYMENT", paymentStatus: "PENDING", pendingSince: now,
+      subtotal: plan.price, total: plan.price, paidAmount: 0, pendingAmount: plan.price, stockProcessedAt: now,
+      operatorId: req.user?.userId,
+      items: { create: [{ companyId: cid, itemType: "SERVICE", serviceId: plan.serviceId, description: `Plano mensalista — ${plan.name}`, quantity: 1, unitPrice: plan.price, total: plan.price }] }
+    } });
+    const membership = await tx.customerMembership.create({ data: {
+      companyId: cid, customerId: body.customerId, petId: body.petId, planId: body.planId, startDate: now, endDate: provisionalEnd,
+      totalUses: plan.usageQuantity, remainingUses: plan.usageQuantity, status: "PENDING_PAYMENT",
+      preferredWeekday: body.preferredWeekday, preferredTime: body.preferredTime, purchaseSaleId: sale.id
+    }, include: { customer: true, pet: true, plan: { include: { service: true } }, purchaseSale: { select: { id: true, internalCode: true, status: true } } } });
+    await tx.customerHistory.create({ data: { companyId: cid, customerId: body.customerId, petId: body.petId, membershipId: membership.id, saleId: sale.id, type: "MEMBERSHIP", title: "Plano aguardando pagamento", description: `${plan.name} · Pedido PD-${String(sale.internalCode).padStart(5, "0")}` } });
+    return { membership, sale: { id: sale.id, internalCode: sale.internalCode } };
   });
-  await prisma.customerHistory.create({
-    data: { companyId: cid, customerId: body.customerId, petId: body.petId, membershipId: membership.id, type: "MEMBERSHIP", title: "Cliente tornou-se mensalista", description: `Plano ${plan.name}` }
+  res.status(201).json(result);
+});
+
+membershipsRouter.post("/renewals/:id/sale", async (req, res) => {
+  const cid = companyId(req);
+  const renewal = await prisma.membershipRenewal.findFirst({
+    where: { id: req.params.id, companyId: cid, status: "PENDING_PAYMENT" },
+    include: { plan: true, appointment: true }
   });
-  res.status(201).json(membership);
+  if (!renewal) return res.status(404).json({ message: "Renovação pendente não encontrada." });
+  if (renewal.appointment.status !== "SCHEDULED") return res.status(409).json({ message: "Este lembrete não está mais disponível para renovação." });
+  const existing = await prisma.sale.findFirst({ where: { companyId: cid, appointmentId: renewal.appointmentId } });
+  if (existing) return res.json({ sale: { id: existing.id, internalCode: existing.internalCode } });
+  const now = new Date();
+  const sale = await prisma.sale.create({ data: {
+    companyId: cid, internalCode: await nextMembershipSaleCode(prisma, cid), customerId: renewal.customerId, petId: renewal.petId,
+    appointmentId: renewal.appointmentId, origin: "AGENDA", status: "WAITING_PAYMENT", paymentStatus: "PENDING", pendingSince: now,
+    subtotal: renewal.priceSnapshot, total: renewal.priceSnapshot, paidAmount: 0, pendingAmount: renewal.priceSnapshot, stockProcessedAt: now,
+    operatorId: req.user?.userId,
+    items: { create: [{ companyId: cid, itemType: "SERVICE", serviceId: renewal.plan.serviceId, description: `Renovação do plano mensalista — ${renewal.plan.name}`, quantity: 1, unitPrice: renewal.priceSnapshot, total: renewal.priceSnapshot }] }
+  } });
+  await prisma.customerHistory.create({ data: { companyId: cid, customerId: renewal.customerId, petId: renewal.petId, appointmentId: renewal.appointmentId, saleId: sale.id, type: "MEMBERSHIP_RENEWAL", title: "Renovação enviada ao Caixa", description: `${renewal.plan.name} · Pedido PD-${String(sale.internalCode).padStart(6, "0")}` } });
+  res.status(201).json({ sale: { id: sale.id, internalCode: sale.internalCode } });
+});
+
+membershipsRouter.patch("/renewals/:id/cancel-package", requireAdmin, async (req, res) => {
+  const cid = companyId(req);
+  const renewal = await prisma.membershipRenewal.findFirst({
+    where: { id: req.params.id, companyId: cid, status: "PENDING_PAYMENT" },
+    include: { appointment: true, plan: true }
+  });
+  if (!renewal) return res.status(404).json({ message: "Lembrete de renovação pendente não encontrado." });
+
+  const result = await prisma.$transaction(async (tx) => {
+    const membership = renewal.appointment.membershipId
+      ? await tx.customerMembership.findFirst({ where: { id: renewal.appointment.membershipId, companyId: cid } })
+      : null;
+
+    if (membership) {
+      await tx.customerMembership.update({ where: { id: membership.id }, data: { status: "CANCELLED" } });
+      await tx.appointment.updateMany({
+        where: { companyId: cid, membershipId: membership.id, status: { in: ["SCHEDULED", "ARRIVED"] } },
+        data: { status: "CANCELLED", paymentStatus: "CANCELLED" }
+      });
+      await tx.membershipUsage.updateMany({
+        where: { companyId: cid, membershipId: membership.id, status: "RESERVED" },
+        data: { status: "RELEASED" }
+      });
+    } else {
+      await tx.appointment.update({ where: { id: renewal.appointmentId }, data: { status: "CANCELLED", paymentStatus: "CANCELLED" } });
+    }
+
+    await tx.membershipRenewal.update({ where: { id: renewal.id }, data: { status: "CANCELLED" } });
+    await tx.sale.updateMany({
+      where: { companyId: cid, appointmentId: renewal.appointmentId, status: "WAITING_PAYMENT" },
+      data: { status: "CANCELLED", paymentStatus: "CANCELLED", cancelReason: "Pacote cancelado no lembrete de renovação", cancelledAt: new Date() }
+    });
+    await tx.customerHistory.create({
+      data: {
+        companyId: cid,
+        customerId: renewal.customerId,
+        petId: renewal.petId,
+        appointmentId: renewal.appointmentId,
+        membershipId: membership?.id,
+        type: "MEMBERSHIP",
+        title: "Pacote mensalista cancelado",
+        description: `${renewal.plan.name} · Cancelado pelo atalho do lembrete de renovação`
+      }
+    });
+    return { membershipId: membership?.id ?? null };
+  });
+
+  res.json({ message: "Pacote cancelado com sucesso.", ...result });
 });
 
 membershipsRouter.post("/:id/use", (_req, res) => {

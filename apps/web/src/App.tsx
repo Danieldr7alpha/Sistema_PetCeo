@@ -27,13 +27,13 @@ type MembershipRenewal = { id: string; status: "PENDING_PAYMENT" | "PAID" | "CAN
 type AppointmentExtraService = { id: string; serviceId: string; nameSnapshot: string; priceSnapshot: number | string; service?: Service };
 type Appointment = { id: string; date: string; startTime: string; endTime?: string; notes?: string; status: string; paymentStatus: string; paymentMode?: "AVULSO" | "PACKAGE" | "RENEWAL_AT_CHECKOUT"; membershipId?: string | null; membership?: Membership | null; membershipUsage?: MembershipUsage | null; membershipRenewal?: MembershipRenewal | null; extraServices?: AppointmentExtraService[]; customer: Customer; pet: Pet; service: Service; sales?: { id: string; internalCode?: number; status?: string; total?: number | string; pendingAmount?: number | string }[] };
 type Plan = { id: string; name: string; usageQuantity: number; validityDays: number; suggestedFrequencyDays: number; price: string; active: boolean; service: Service };
-type Membership = { id: string; startDate: string; endDate: string; totalUses: number; remainingUses: number; usedUses: number; status: string; customer: Customer; pet: Pet; plan: Plan; usages?: { id: string }[]; reservedUses?: number; availableUses?: number; usable?: boolean; unavailableReason?: "EXPIRED" | "INACTIVE" | "PENDING_PAYMENT" | "NO_BALANCE" | null };
+type Membership = { id: string; startDate: string; endDate: string; totalUses: number; remainingUses: number; usedUses: number; status: string; preferredWeekday?: number | null; preferredTime?: string | null; purchaseSale?: { id: string; internalCode?: number | null; status: SaleStatus } | null; customer: Customer; pet: Pet; plan: Plan; usages?: { id: string }[]; reservedUses?: number; availableUses?: number; usable?: boolean; unavailableReason?: "EXPIRED" | "INACTIVE" | "PENDING_PAYMENT" | "NO_BALANCE" | null };
 type SaleStatus = "WAITING_PAYMENT" | "PARTIALLY_PAID" | "PENDING" | "PAID" | "CANCELLED" | "REFUNDED";
 type PaymentMethod = "PIX" | "CASH" | "DEBIT" | "CREDIT" | "TRANSFER" | "VOUCHER" | "OTHER";
 type SaleItem = { id?: string; itemType: "SERVICE" | "PRODUCT"; serviceId?: string | null; productId?: string | null; description: string; quantity: number; unitPrice: number | string; total: number | string; coveredByMembership?: boolean; service?: Service; product?: Product };
 type SalePayment = { id?: string; method: PaymentMethod; amount: number | string; paymentMethodNameSnapshot?: string | null; institutionNameSnapshot?: string | null; grossAmount?: number | string | null; feeAmount?: number | string | null; netAmount?: number | string | null; expectedSettlementDate?: string | null; cardBrand?: string | null; cardNsu?: string | null; cardAuthorization?: string | null; installments?: number | null; pixReference?: string | null; cashReceived?: number | string | null; changeAmount?: number | string | null; paidAt?: string };
 type SalesReceipt = { id: string; receiptCode: number; saleId: string; companyNameSnapshot: string; companyDocumentSnapshot?: string | null; customerCodeSnapshot?: number | null; customerNameSnapshot?: string | null; petNameSnapshot?: string | null; operatorNameSnapshot?: string | null; itemsSnapshot: { itemType: "PRODUCT" | "SERVICE"; catalogCode?: number | null; description: string; quantity: number; unitPrice: number; total: number; coveredByMembership?: boolean }[]; paymentsSnapshot: { method: PaymentMethod; amount: number; paymentMethodNameSnapshot?: string | null; institutionNameSnapshot?: string | null; grossAmount?: number | null; feeAmount?: number | null; netAmount?: number | null; expectedSettlementDate?: string | null; cardBrand?: string | null; cardNsu?: string | null; cardAuthorization?: string | null; installments?: number | null; pixReference?: string | null; cashReceived?: number | null; changeAmount?: number | null; paidAt?: string }[]; subtotal: number | string; discount: number | string; total: number | string; paidAmount: number | string; issuedAt: string; status: string };
-type Sale = { id: string; internalCode?: number; cashSessionId?: string | null; preSaleId?: string | null; customer?: Customer | null; pet?: Pet | null; appointment?: Appointment | null; appointmentId?: string | null; origin: "AGENDA" | "DIRECT" | "PRE_SALE"; status: SaleStatus; paymentMethod?: PaymentMethod | null; paymentStatus?: string; subtotal: number | string; discount: number | string; discountType?: "VALUE" | "PERCENT"; discountPercent?: number | string | null; total: number | string; paidAmount?: number | string; pendingAmount?: number | string; pendingReason?: string | null; pendingNotes?: string | null; pendingSince?: string | null; expectedPaymentDate?: string | null; cancelReason?: string | null; cardBrand?: string | null; cardNsu?: string | null; cardAuthorization?: string | null; operatorName?: string | null; paidAt?: string | null; cancelledAt?: string | null; createdAt: string; payments?: SalePayment[]; items: SaleItem[]; receipt?: SalesReceipt | null };
+type Sale = { id: string; internalCode?: number; cashSessionId?: string | null; preSaleId?: string | null; customer?: Customer | null; pet?: Pet | null; appointment?: Appointment | null; appointmentId?: string | null; membershipPurchase?: { id: string; status: string } | null; origin: "AGENDA" | "DIRECT" | "PRE_SALE"; status: SaleStatus; paymentMethod?: PaymentMethod | null; paymentStatus?: string; subtotal: number | string; discount: number | string; discountType?: "VALUE" | "PERCENT"; discountPercent?: number | string | null; total: number | string; paidAmount?: number | string; pendingAmount?: number | string; pendingReason?: string | null; pendingNotes?: string | null; pendingSince?: string | null; expectedPaymentDate?: string | null; cancelReason?: string | null; refundReason?: string | null; refundedAt?: string | null; refundedByName?: string | null; cardBrand?: string | null; cardNsu?: string | null; cardAuthorization?: string | null; operatorName?: string | null; paidAt?: string | null; cancelledAt?: string | null; createdAt: string; payments?: SalePayment[]; items: SaleItem[]; receipt?: SalesReceipt | null };
 type CustomerHistoryItem = { id: string; saleId?: string | null; createdAt: string; title: string; description?: string; amount?: string };
 type CustomerDetailData = Customer & { histories: CustomerHistoryItem[]; sales: Sale[] };
 type ReceiptDetailSale = Sale & { cashSession?: CashSession | null };
@@ -60,7 +60,7 @@ type CashSession = { id: string; internalCode?: number; cashRegisterId?: string 
 type CashCurrent = { session: CashSession | null; hasPreviousSession: boolean; openingBalance: number };
 type CashSummary = { session: CashSession; sales: Sale[]; totalsByMethod: Record<PaymentMethod, number>; pendingTotal: number; cancelledTotal: number; discountsTotal: number; cashIn: number; cashOut: number; totalReceived: number; expectedCash: number };
 type CashPaymentDetail = { id: string; method: PaymentMethod; amount: number; cardBrand?: string | null; cardNsu?: string | null; installments?: number | null; pixReference?: string | null; cashReceived?: number | null; changeAmount?: number | null; paidAt: string; saleCode?: number | null; receiptCode?: number | null; customerName: string; petName?: string | null; operatorName: string };
-type CashReport = { sessions: CashSession[]; totalsByMethod: Record<PaymentMethod, number>; totalReceived: number; pendingTotal: number; cancelledTotal: number; discountsTotal: number; paymentDetails: CashPaymentDetail[]; byOperator: { name: string; total: number }[]; byService: { name: string; total: number }[]; byProduct: { name: string; total: number }[]; byHour: { hour: string; total: number }[] };
+type CashReport = { sessions: CashSession[]; totalsByMethod: Record<PaymentMethod, number>; totalReceived: number; pendingTotal: number; cancelledTotal: number; refundedTotal: number; discountsTotal: number; paymentDetails: CashPaymentDetail[]; refundDetails: { id: string; saleCode?: number | null; customerName: string; petName?: string | null; amount: number; reason?: string | null; refundedAt: string; operatorName?: string | null }[]; byOperator: { name: string; total: number }[]; byService: { name: string; total: number }[]; byProduct: { name: string; total: number }[]; byHour: { hour: string; total: number }[] };
 type PreSaleStatus = "OPEN" | "CONVERTED" | "EXPIRED" | "CANCELLED";
 type PreSaleItem = SaleItem & { preSaleId?: string };
 type PreSale = { id: string; internalCode?: number; customer?: Customer | null; pet?: Pet | null; operatorName?: string | null; status: PreSaleStatus; expiresAt?: string | null; subtotal: number | string; discount: number | string; total: number | string; notes?: string | null; convertedSaleId?: string | null; createdAt: string; items: PreSaleItem[] };
@@ -88,7 +88,7 @@ const statusLabels: Record<string, string> = {
   SCHEDULED: "Agendado", ARRIVED: "Cliente chegou", IN_SERVICE: "Em atendimento", BATHING: "Em banho",
   WAITING_PICKUP: "Aguardando retirada", FINISHED: "Finalizado", CANCELLED: "Cancelado"
 };
-const membershipStatusLabels: Record<string, string> = { ACTIVE: "Ativo", EXPIRED: "Vencido", CANCELLED: "Cancelado" };
+const membershipStatusLabels: Record<string, string> = { ACTIVE: "Ativo", PENDING_PAYMENT: "Aguardando pagamento", EXPIRED: "Vencido", CANCELLED: "Cancelado" };
 const saleStatusLabels: Record<SaleStatus, string> = { WAITING_PAYMENT: "Aguardando pagamento", PARTIALLY_PAID: "Parcialmente pago", PENDING: "Pagar depois", PAID: "Pago", CANCELLED: "Cancelado", REFUNDED: "Estornado" };
 const paymentMethodLabels: Record<PaymentMethod, string> = { PIX: "PIX", CASH: "Dinheiro", DEBIT: "Débito", CREDIT: "Crédito", TRANSFER: "Transferência", VOUCHER: "Voucher", OTHER: "Outro" };
 const pendingReasonLabels: Record<string, string> = { PIX_LATER: "Cliente vai fazer PIX depois", PAY_ON_PICKUP: "Pagará na retirada", OWED: "Ficou devendo", CARD_PROBLEM: "Problema no cartão", PARTIAL_PAYMENT: "Pagamento parcial", OTHER: "Outro" };
@@ -711,8 +711,8 @@ function Dashboard() {
     ["Frequência reduzida", data?.cards.reducedFrequency ?? 0]
   ];
   return <Page title="Dashboard">
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{cards.map(([label, value]) => <div className="panel p-4" key={label}><p className="text-sm text-slate-500">{label}</p><strong className="mt-2 block text-2xl">{value}</strong></div>)}</div>
-    <section className="panel mt-5 p-5"><h2 className="font-semibold">CEO Pet AI recomenda</h2><div className="mt-4 grid gap-3 md:grid-cols-2">{(data?.recommendations ?? []).map((text) => <div key={text} className="rounded-md border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">{text}</div>)}</div></section>
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">{cards.map(([label, value], index) => <div className={`panel p-4 ${index === 0 ? "border-blue-200 bg-blue-50" : index === 1 ? "border-emerald-200 bg-emerald-50" : ""}`} key={label}><p className="text-xs font-medium text-slate-600 sm:text-sm">{label}</p><strong className="mt-2 block break-words text-xl sm:text-2xl">{value}</strong></div>)}</div>
+    <section className="panel mt-4 p-4 sm:mt-5 sm:p-5"><h2 className="font-semibold">CEO Pet AI recomenda</h2><div className="mt-3 grid gap-3 lg:grid-cols-2">{(data?.recommendations ?? []).map((text) => <div key={text} className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm leading-relaxed text-blue-900">{text}</div>)}</div></section>
   </Page>;
 }
 
@@ -936,9 +936,9 @@ function PurchaseDetailsModal({ saleId, onClose }: { saleId: string; onClose: ()
   </Modal>;
 }
 
-function Memberships({ onCreateCustomer }: { onCreateCustomer: () => void }) {
+function Memberships({ onCreateCustomer, onOpenSale }: { onCreateCustomer: () => void; onOpenSale: (saleId: string) => void }) {
   const [tab, setTab] = useState<"memberships" | "plans">("memberships");
-  const [filter, setFilter] = useState<"ACTIVE" | "EXPIRED" | "CANCELLED" | "EXPIRING">("ACTIVE");
+  const [filter, setFilter] = useState<"ACTIVE" | "PENDING_PAYMENT" | "EXPIRED" | "CANCELLED" | "EXPIRING">("ACTIVE");
   const [planFilter, setPlanFilter] = useState<"ACTIVE" | "INACTIVE">("ACTIVE");
   const { data: memberships, refresh } = useData<Membership[]>(`/memberships?status=${filter}`, [filter]);
   const [planKey, setPlanKey] = useState(0);
@@ -950,7 +950,7 @@ function Memberships({ onCreateCustomer }: { onCreateCustomer: () => void }) {
   const visiblePlans = (plans ?? []).filter((plan) => planFilter === "ACTIVE" ? plan.active : !plan.active);
   async function cancel(id: string) { await api(`/memberships/${id}/cancel`, { method: "PATCH" }); refresh(); }
   const action = tab === "memberships"
-    ? <button className="btn btn-primary" onClick={() => setMembershipOpen(true)}><Plus size={16} />Ativar mensalidade</button>
+    ? <button className="btn btn-primary" onClick={() => setMembershipOpen(true)}><Plus size={16} />Vender plano mensalista</button>
     : <button className="btn btn-primary" onClick={() => setPlanModal({ mode: "create" })}><Plus size={16} />Criar plano</button>;
   return <Page title="Mensalistas" action={action}>
     <div className="mb-4 flex flex-wrap gap-2">
@@ -958,8 +958,8 @@ function Memberships({ onCreateCustomer }: { onCreateCustomer: () => void }) {
       <button className={`btn ${tab === "plans" ? "btn-primary" : "btn-secondary"}`} onClick={() => setTab("plans")}>Planos</button>
     </div>
     {tab === "memberships" && <section>
-      <div className="mb-4 flex flex-wrap gap-2">{[["ACTIVE", "Ativos"], ["EXPIRED", "Vencidos"], ["CANCELLED", "Cancelados"], ["EXPIRING", "Vencendo 7 dias"]].map(([key, label]) => <button key={key} className={`btn ${filter === key ? "btn-primary" : "btn-secondary"}`} onClick={() => setFilter(key as "ACTIVE" | "EXPIRED" | "CANCELLED" | "EXPIRING")}>{label}</button>)}</div>
-      <DataCards items={(memberships ?? []).map((m) => ({ title: m.customer.name, subtitle: `${m.pet.name} | ${m.plan.name}`, meta: `${m.remainingUses} usos | vence ${dateBR(m.endDate)}`, status: membershipStatusLabels[m.status] ?? m.status, action: m.status === "ACTIVE" ? <button className="btn btn-secondary" onClick={() => cancel(m.id)}>Cancelar</button> : undefined }))} />
+      <div className="mb-4 flex flex-wrap gap-2">{[["ACTIVE", "Ativos"], ["PENDING_PAYMENT", "Aguardando pagamento"], ["EXPIRED", "Vencidos"], ["CANCELLED", "Cancelados"], ["EXPIRING", "Vencendo 7 dias"]].map(([key, label]) => <button key={key} className={`btn ${filter === key ? "btn-primary" : "btn-secondary"}`} onClick={() => setFilter(key as "ACTIVE" | "PENDING_PAYMENT" | "EXPIRED" | "CANCELLED" | "EXPIRING")}>{label}</button>)}</div>
+      <DataCards items={(memberships ?? []).map((m) => ({ title: m.customer.name, subtitle: `${m.pet.name} | ${m.plan.name}`, meta: `${m.remainingUses} usos | ${m.preferredWeekday != null ? ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"][m.preferredWeekday] : "Dia não definido"} às ${m.preferredTime ?? "--:--"}${m.status === "ACTIVE" ? ` | vence ${dateBR(m.endDate)}` : ""}`, status: membershipStatusLabels[m.status] ?? m.status, action: m.status === "ACTIVE" ? <button className="btn btn-secondary" onClick={() => cancel(m.id)}>Cancelar</button> : m.status === "PENDING_PAYMENT" && m.purchaseSale ? <button className="btn btn-primary" onClick={() => onOpenSale(m.purchaseSale!.id)}>Ir para o Caixa</button> : undefined }))} />
     </section>}
     {tab === "plans" && <section>
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -970,7 +970,7 @@ function Memberships({ onCreateCustomer }: { onCreateCustomer: () => void }) {
     </section>}
     {planModal && <PlanModal mode={planModal.mode} plan={planModal.plan} services={services ?? []} onClose={() => setPlanModal(null)} onSaved={() => { setPlanModal(null); setPlanKey((key) => key + 1); }} />}
     {deletePlan && <DeletePlanModal plan={deletePlan} onClose={() => setDeletePlan(null)} onDeleted={() => { setDeletePlan(null); setPlanKey((key) => key + 1); }} />}
-    {membershipOpen && <MembershipForm plans={(plans ?? []).filter((p) => p.active)} onCreateCustomer={() => { setMembershipOpen(false); onCreateCustomer(); }} onClose={() => setMembershipOpen(false)} onSaved={() => { setMembershipOpen(false); refresh(); }} />}
+    {membershipOpen && <MembershipForm plans={(plans ?? []).filter((p) => p.active)} onCreateCustomer={() => { setMembershipOpen(false); onCreateCustomer(); }} onClose={() => setMembershipOpen(false)} onSaved={(saleId) => { setMembershipOpen(false); refresh(); onOpenSale(saleId); }} />}
   </Page>;
 }
 
@@ -1015,7 +1015,7 @@ function DeletePlanModal({ plan, onClose, onDeleted }: { plan: Plan; onClose: ()
   return <Modal title="Apagar plano" onClose={onClose}><form className="grid gap-3" onSubmit={submit}><p className="text-sm text-slate-600">Confirme a senha do administrador para apagar o plano <b>{plan.name}</b>. Se houver mensalidades vinculadas, o plano será apenas desativado para preservar o histórico.</p><label className="text-sm font-medium">Senha do administrador<input className="field mt-1" type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>{error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}<div className="flex justify-end gap-2"><button className="btn btn-secondary" type="button" onClick={onClose}>Cancelar</button><button className="btn btn-primary" disabled={loading || !password}>{loading ? "Validando..." : "Apagar"}</button></div></form></Modal>;
 }
 
-function MembershipForm({ plans, onCreateCustomer, onClose, onSaved }: { plans: Plan[]; onCreateCustomer: () => void; onClose: () => void; onSaved: () => void }) {
+function MembershipForm({ plans, onCreateCustomer, onClose, onSaved }: { plans: Plan[]; onCreateCustomer: () => void; onClose: () => void; onSaved: (saleId: string) => void }) {
   const [customerQuery, setCustomerQuery] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [results, setResults] = useState<Customer[]>([]);
@@ -1023,10 +1023,12 @@ function MembershipForm({ plans, onCreateCustomer, onClose, onSaved }: { plans: 
   const [searchTouched, setSearchTouched] = useState(false);
   const [petId, setPetId] = useState("");
   const [planId, setPlanId] = useState(plans[0]?.id ?? "");
+  const [preferredWeekday, setPreferredWeekday] = useState(String(new Date().getDay()));
+  const [preferredTime, setPreferredTime] = useState("09:00");
   const [error, setError] = useState("");
   const activePets = selectedCustomer?.pets.filter((pet) => pet.status === "ACTIVE") ?? [];
   const selectedPetId = petId || (activePets.length === 1 ? activePets[0].id : "");
-  const duplicateActive = selectedCustomer?.memberships?.some((membership) => membership.status === "ACTIVE" && membership.pet.id === selectedPetId && membership.plan.id === planId);
+  const duplicateActive = selectedCustomer?.memberships?.some((membership) => ["ACTIVE", "PENDING_PAYMENT"].includes(membership.status) && membership.pet.id === selectedPetId && membership.plan.id === planId);
 
   useEffect(() => {
     const search = customerQuery.trim();
@@ -1081,18 +1083,18 @@ function MembershipForm({ plans, onCreateCustomer, onClose, onSaved }: { plans: 
     setError("");
     if (!selectedCustomer || !selectedPetId || !planId) return;
     if (duplicateActive) {
-      setError("Este cliente já possui uma mensalidade ativa para este plano.");
+      setError("Este cliente já possui uma mensalidade ativa ou um pedido aguardando pagamento para este plano.");
       return;
     }
     try {
-      await api("/memberships", { method: "POST", body: JSON.stringify({ customerId: selectedCustomer.id, petId: selectedPetId, planId, startDate: new Date().toISOString() }) });
-      onSaved();
+      const result = await api<{ sale: { id: string } }>("/memberships", { method: "POST", body: JSON.stringify({ customerId: selectedCustomer.id, petId: selectedPetId, planId, preferredWeekday: Number(preferredWeekday), preferredTime }) });
+      onSaved(result.sale.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível ativar a mensalidade.");
     }
   }
 
-  return <Modal title="Ativar Mensalidade" onClose={onClose}><form className="grid gap-3" onSubmit={submit}>
+  return <Modal title="Vender plano mensalista" onClose={onClose}><form className="grid gap-3" onSubmit={submit}>
     <label className="relative text-sm font-medium">Buscar cliente
       <div className="mt-1 flex gap-2">
         <input className="field min-h-11 flex-1" placeholder="Digite nome, pet, CPF, celular ou código" value={customerQuery} onFocus={() => setSearchTouched(true)} onChange={(event) => { setSelectedCustomer(null); setCustomerQuery(event.target.value); setSearchTouched(true); setPetId(""); setError(""); }} />
@@ -1115,9 +1117,11 @@ function MembershipForm({ plans, onCreateCustomer, onClose, onSaved }: { plans: 
     {selectedCustomer && activePets.length === 1 && <div className="rounded-md border border-slate-200 p-3 text-sm"><b>Pet selecionado</b><p className="text-slate-600">{activePets[0].name}</p></div>}
     {selectedCustomer && activePets.length > 1 && <label className="text-sm font-medium">Pet<select className="field mt-1" required value={selectedPetId} onChange={(event) => setPetId(event.target.value)}><option value="">Selecione o pet</option>{activePets.map((pet) => <option key={pet.id} value={pet.id}>{pet.name}</option>)}</select></label>}
     <label className="text-sm font-medium">Plano<select className="field mt-1" required value={planId} onChange={(event) => { setPlanId(event.target.value); setError(""); }}>{plans.map((plan) => <option key={plan.id} value={plan.id}>{plan.name} - {currency(plan.price)}</option>)}</select></label>
-    {duplicateActive && <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">Este cliente já possui uma mensalidade ativa para este plano.</p>}
+    <div className="rounded-xl border border-blue-200 bg-blue-50 p-4"><h3 className="font-semibold text-blue-950">Agendamento fixo do mensalista</h3><p className="mt-1 text-sm text-blue-800">Depois que o plano for pago, o sistema criará automaticamente os agendamentos conforme a quantidade de usos do plano.</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="text-sm font-medium">Dia da semana<select className="field mt-1" required value={preferredWeekday} onChange={(event) => setPreferredWeekday(event.target.value)}>{["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"].map((day, index) => <option key={day} value={index}>{day}</option>)}</select></label><label className="text-sm font-medium">Horário fixo<input className="field mt-1" required type="time" value={preferredTime} onChange={(event) => setPreferredTime(event.target.value)} /></label></div></div>
+    {duplicateActive && <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">Este cliente já possui uma mensalidade ativa ou um pedido aguardando pagamento para este plano.</p>}
     {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-    <button className="btn btn-primary justify-self-end" disabled={!selectedCustomer || !selectedPetId || !planId || plans.length === 0}>Ativar</button>
+    <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">O cliente só será ativado como mensalista depois que o pedido for pago no Caixa.</p>
+    <button className="btn btn-primary justify-self-end" disabled={!selectedCustomer || !selectedPetId || !planId || !preferredTime || plans.length === 0}>Gerar pedido e ir ao Caixa</button>
   </form></Modal>;
 }
 
@@ -1128,6 +1132,7 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
   const [customerFormOpen, setCustomerFormOpen] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
+  const [rescheduleAppointment, setRescheduleAppointment] = useState<Appointment | null>(null);
   const [selectedDate, setSelectedDate] = useState(localDateInput());
   const [calendarMonth, setCalendarMonth] = useState(localDateInput());
   const [view, setView] = useState<"day" | "week" | "month">("day");
@@ -1142,6 +1147,30 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
       refresh();
     }
     finally { setLoadingId(""); }
+  }
+  async function renew(appointment: Appointment) {
+    if (!appointment.membershipRenewal) return;
+    setLoadingId(appointment.id);
+    try {
+      const result = await api<{ sale: { id: string } }>(`/memberships/renewals/${appointment.membershipRenewal.id}/sale`, { method: "POST" });
+      setSelectedAppointment(null);
+      onCharge({ ...appointment, sales: [{ id: result.sale.id, status: "WAITING_PAYMENT" }] });
+    } finally {
+      setLoadingId("");
+    }
+  }
+  async function cancelPackage(appointment: Appointment) {
+    if (!appointment.membershipRenewal) return;
+    const confirmed = window.confirm("Cancelar o pacote mensalista deste cliente? O lembrete de renovação será removido da agenda.");
+    if (!confirmed) return;
+    setLoadingId(appointment.id);
+    try {
+      await api(`/memberships/renewals/${appointment.membershipRenewal.id}/cancel-package`, { method: "PATCH" });
+      setSelectedAppointment(null);
+      refresh();
+    } finally {
+      setLoadingId("");
+    }
   }
   const query = search.trim().toLowerCase();
   const allAppointments = (data ?? []).filter((appointment) => appointment.status !== "CANCELLED");
@@ -1185,14 +1214,16 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
   }
   function appointmentCard(appointment: Appointment, compact = false) {
     const color = appointmentColor(appointment.status);
+    const renewalReminder = appointment.membershipRenewal?.status === "PENDING_PAYMENT";
     const membership = appointment.membership;
     const usage = appointment.membershipUsage;
-    return <button className={`rounded-lg border p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${color.card}`} key={appointment.id} onClick={() => setSelectedAppointment(appointment)}>
+    return <button className={`rounded-lg border p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${renewalReminder ? "border-fuchsia-400 bg-fuchsia-100 ring-2 ring-fuchsia-300" : color.card}`} key={appointment.id} onClick={() => setSelectedAppointment(appointment)}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${color.dot}`} /><b>{compact ? `${appointment.startTime} - ${appointment.pet.name}` : appointment.pet.name}</b></div>
           <p className="mt-1 text-sm text-slate-700">{appointment.customer.name}</p>
           <p className="text-sm font-medium text-slate-800">{appointment.service.name}</p>
+          {renewalReminder && <span className="badge mt-2 w-fit bg-fuchsia-600 text-white">Renovação pendente</span>}
           {!!appointment.extraServices?.length && <p className="text-xs text-slate-600">+ {appointment.extraServices.length} serviço{appointment.extraServices.length === 1 ? "" : "s"} avulso{appointment.extraServices.length === 1 ? "" : "s"}</p>}
           {!compact && membership && usage && <div className="mt-2 grid gap-1 text-xs text-slate-700"><span className="badge w-fit bg-emerald-50 text-emerald-800">Mensalista</span><p>{membership.plan.name}</p><p>{usage.status === "RESERVED" ? "Uso reservado" : usage.status === "CONSUMED" ? `Pacote utilizado · Uso ${usage.usageNumber} de ${membership.totalUses}` : "Reserva liberada"}</p><p>{usage.status === "CONSUMED" ? `Restam ${usage.balanceAfter ?? membership.remainingUses} usos` : `${Math.max(0, membership.remainingUses - (membership.usages?.length ?? membership.reservedUses ?? 0))} disponíveis`}</p></div>}
           {!compact && appointment.membershipRenewal?.status === "PENDING_PAYMENT" && <div className="mt-2 grid gap-1 text-xs text-amber-900"><span className="badge w-fit bg-amber-100 text-amber-900">Renovação pendente</span><p>{appointment.membershipRenewal.plan.name}</p><p>Cobrar {currency(appointment.membershipRenewal.priceSnapshot)} no Caixa</p></div>}
@@ -1222,7 +1253,7 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
     </div>;
   }
   return <Page title="Agenda" action={<button className="btn btn-primary" onClick={() => openAt("09:00")}><Plus size={16} />Novo Agendamento</button>}>
-    <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
+    <div className="agenda-responsive grid gap-4 lg:grid-cols-[280px_1fr]">
       <aside className="hidden lg:block">{miniCalendar()}</aside>
       <div className="lg:hidden"><button className="btn btn-secondary w-full" onClick={() => setCalendarOpen(true)}>Escolher data</button></div>
     <div className="panel overflow-hidden">
@@ -1254,13 +1285,14 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
     </div>
     </div>
     {calendarOpen && <Modal title="Escolher data" onClose={() => setCalendarOpen(false)}>{miniCalendar()}</Modal>}
-    {selectedAppointment && <AppointmentDrawer appointment={selectedAppointment} loadingId={loadingId} onClose={() => setSelectedAppointment(null)} onMove={move} onCharge={onCharge} />}
+    {selectedAppointment && <AppointmentDrawer appointment={selectedAppointment} loadingId={loadingId} onClose={() => setSelectedAppointment(null)} onMove={move} onCharge={onCharge} onRenew={() => renew(selectedAppointment)} onCancelPackage={() => cancelPackage(selectedAppointment)} onReschedule={() => setRescheduleAppointment(selectedAppointment)} />}
+    {rescheduleAppointment && <RescheduleAppointmentForm appointment={rescheduleAppointment} onClose={() => setRescheduleAppointment(null)} onSaved={(updated) => { setRescheduleAppointment(null); setSelectedAppointment(updated); setSelectedDate(updated.date.slice(0, 10)); setCalendarMonth(updated.date.slice(0, 10)); refresh(); }} />}
     {open && <AppointmentForm services={services ?? []} initialDate={selectedDate} initialTime={initialTime} onCreateCustomer={() => setCustomerFormOpen(true)} onRenewMembership={() => { setOpen(false); onRenewMembership(); }} onClose={() => setOpen(false)} onSaved={() => { setOpen(false); refresh(); }} />}
     {customerFormOpen && <CustomerForm onClose={() => setCustomerFormOpen(false)} onSaved={() => setCustomerFormOpen(false)} />}
   </Page>;
 }
 
-function AppointmentDrawer({ appointment, loadingId, onClose, onMove, onCharge }: { appointment: Appointment; loadingId: string; onClose: () => void; onMove: (id: string, status: string) => void; onCharge: (appointment: Appointment) => void }) {
+function AppointmentDrawer({ appointment, loadingId, onClose, onMove, onCharge, onRenew, onCancelPackage, onReschedule }: { appointment: Appointment; loadingId: string; onClose: () => void; onMove: (id: string, status: string) => void; onCharge: (appointment: Appointment) => void; onRenew: () => void; onCancelPackage: () => void; onReschedule: () => void }) {
   const membership = appointment.membership;
   const usage = appointment.membershipUsage;
   const order = appointment.sales?.[0];
@@ -1304,16 +1336,55 @@ function AppointmentDrawer({ appointment, loadingId, onClose, onMove, onCharge }
         <section>
           <h3 className="mb-2 font-semibold">Próximas ações</h3>
           <div className="flex flex-wrap gap-2">
-            <button disabled={appointment.status !== "SCHEDULED" || loadingId === appointment.id} className="btn btn-secondary disabled:opacity-40" onClick={() => onMove(appointment.id, "ARRIVED")}>Chegou</button>
-            <button disabled={appointment.status !== "ARRIVED" || loadingId === appointment.id} className="btn btn-secondary disabled:opacity-40" onClick={() => onMove(appointment.id, "IN_SERVICE")}>Iniciar atendimento</button>
-            <button disabled={appointment.status !== "IN_SERVICE" || loadingId === appointment.id} className="btn btn-primary disabled:opacity-40" onClick={() => onMove(appointment.id, "FINISHED")}>Finalizar</button>
+            {appointment.membershipRenewal?.status === "PENDING_PAYMENT" && <><button disabled={loadingId === appointment.id} className="btn btn-primary disabled:opacity-40" onClick={onRenew}>{loadingId === appointment.id ? "Processando..." : "Renovar"}</button><button disabled={loadingId === appointment.id} className="btn btn-secondary border-red-200 text-red-700 disabled:opacity-40" onClick={onCancelPackage}>Cancelar pacote</button></>}
+            {appointment.membershipId && usage?.status === "RESERVED" && appointment.status === "SCHEDULED" && <button className="btn btn-secondary" onClick={onReschedule}>Reagendar</button>}
+            <button disabled={appointment.membershipRenewal?.status === "PENDING_PAYMENT" || appointment.status !== "SCHEDULED" || loadingId === appointment.id} className="btn btn-secondary disabled:opacity-40" onClick={() => onMove(appointment.id, "ARRIVED")}>Chegou</button>
+            <button disabled={appointment.membershipRenewal?.status === "PENDING_PAYMENT" || appointment.status !== "ARRIVED" || loadingId === appointment.id} className="btn btn-secondary disabled:opacity-40" onClick={() => onMove(appointment.id, "IN_SERVICE")}>Iniciar atendimento</button>
+            <button disabled={appointment.membershipRenewal?.status === "PENDING_PAYMENT" || appointment.status !== "IN_SERVICE" || loadingId === appointment.id} className="btn btn-primary disabled:opacity-40" onClick={() => onMove(appointment.id, "FINISHED")}>Finalizar</button>
             {canCharge ? <button disabled={loadingId === appointment.id} className="btn btn-primary disabled:opacity-40" onClick={() => onCharge(appointment)}>{loadingId === appointment.id ? "Abrindo caixa..." : "Cobrar"}</button> : appointment.status === "FINISHED" && order?.status === "PAID" ? <span className="badge bg-emerald-50 text-emerald-700">Pagamento concluído</span> : noChargeRequired ? <span className="badge bg-emerald-50 text-emerald-700">Sem cobrança pendente</span> : null}
-            <button disabled={!["SCHEDULED", "ARRIVED"].includes(appointment.status) || loadingId === appointment.id} className="btn btn-secondary text-red-700 disabled:opacity-40" onClick={() => onMove(appointment.id, "CANCELLED")}>Cancelar</button>
+            {!appointment.membershipId && <button disabled={!["SCHEDULED", "ARRIVED"].includes(appointment.status) || loadingId === appointment.id} className="btn btn-secondary text-red-700 disabled:opacity-40" onClick={() => onMove(appointment.id, "CANCELLED")}>Cancelar</button>}
           </div>
         </section>
       </div>
     </aside>
   </div>;
+}
+
+function RescheduleAppointmentForm({ appointment, onClose, onSaved }: { appointment: Appointment; onClose: () => void; onSaved: (appointment: Appointment) => void }) {
+  const [date, setDate] = useState(appointment.date.slice(0, 10));
+  const [startTime, setStartTime] = useState(appointment.startTime.slice(0, 5));
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const updated = await api<Appointment>(`/appointments/${appointment.id}/reschedule`, {
+        method: "PATCH",
+        body: JSON.stringify({ date, startTime })
+      });
+      onSaved(updated);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Não foi possível reagendar o atendimento.");
+    } finally {
+      setSaving(false);
+    }
+  }
+  return <Modal title="Reagendar mensalista" onClose={onClose}>
+    <form className="grid gap-4" onSubmit={submit}>
+      <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+        <b>{appointment.pet.name} · {appointment.membership?.plan.name}</b>
+        <p className="mt-1">Esta alteração vale somente para este atendimento. O dia fixo dos próximos agendamentos não será alterado e nenhum uso adicional será consumido.</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="text-sm font-medium">Nova data<input className="field mt-1" type="date" min={localDateInput()} required value={date} onChange={(event) => setDate(event.target.value)} /></label>
+        <label className="text-sm font-medium">Novo horário<input className="field mt-1" type="time" required value={startTime} onChange={(event) => setStartTime(event.target.value)} /></label>
+      </div>
+      {error && <p className="alert alert-error">{error}</p>}
+      <div className="flex justify-end gap-2"><button type="button" className="btn btn-secondary" onClick={onClose}>Cancelar</button><button className="btn btn-primary" disabled={saving}>{saving ? "Reagendando..." : "Confirmar reagendamento"}</button></div>
+    </form>
+  </Modal>;
 }
 
 function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer, onRenewMembership, onClose, onSaved }: { services: Service[]; initialDate?: string; initialTime?: string; onCreateCustomer: () => void; onRenewMembership: () => void; onClose: () => void; onSaved: () => void }) {
@@ -2122,6 +2193,7 @@ function CashPointOfSaleLayout({ cashSession, query, setQuery, loadedSale, waiti
   const selectedPet = activePets.find((pet) => pet.id === selectedPetId) ?? (activePets.length === 1 ? activePets[0] : null);
   const filteredPets = activePets.filter((pet) => normalizeOption(pet.name).includes(normalizeOption(petQuery)));
   const appointmentSaleLocked = isFinalizedAppointmentSale(loadedSale);
+  const customerPetLocked = appointmentSaleLocked || Boolean(loadedSale?.membershipPurchase);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
@@ -2169,10 +2241,10 @@ function CashPointOfSaleLayout({ cashSession, query, setQuery, loadedSale, waiti
   }, [orderSearchOpen, orderSearchQuery, orderSearchPage]);
 
   useEffect(() => {
-    if (!appointmentSaleLocked) return;
+    if (!customerPetLocked) return;
     setClientModalOpen(false);
     setPetModalOpen(false);
-  }, [appointmentSaleLocked]);
+  }, [customerPetLocked]);
 
   useEffect(() => {
     const term = clientQuery.trim();
@@ -2222,8 +2294,8 @@ function CashPointOfSaleLayout({ cashSession, query, setQuery, loadedSale, waiti
   const discountRawValue = discountType === "PERCENT" ? cartTotal * discountPercentNumber / 100 : decimalFromCents(discountCents);
   const discountValue = Math.min(cartTotal, Math.max(0, discountRawValue));
   const orderTotal = Math.max(0, cartTotal - discountValue);
-  const currentCustomer = appointmentSaleLocked ? loadedSale?.customer ?? selectedCustomer : selectedCustomer;
-  const currentPet = appointmentSaleLocked ? loadedSale?.pet ?? selectedPet : selectedPet;
+  const currentCustomer = customerPetLocked ? loadedSale?.customer ?? selectedCustomer : selectedCustomer;
+  const currentPet = customerPetLocked ? loadedSale?.pet ?? selectedPet : selectedPet;
   const paidBefore = Number(loadedSale?.paidAmount ?? 0);
   const currentPendingAmount = Number(Math.max(0, orderTotal - paidBefore).toFixed(2));
 
@@ -2283,7 +2355,7 @@ function CashPointOfSaleLayout({ cashSession, query, setQuery, loadedSale, waiti
   function openCustomerFromDeferredFlow() {
     setPayLaterModalOpen(false);
     setPaymentModalOpen(false);
-    setClientModalOpen(true);
+    if (!customerPetLocked) setClientModalOpen(true);
   }
 
   function cancelCurrentOrder() {
@@ -2299,11 +2371,11 @@ function CashPointOfSaleLayout({ cashSession, query, setQuery, loadedSale, waiti
   }
 
   function openClientSearch() {
-    if (!appointmentSaleLocked) setClientModalOpen(true);
+    if (!customerPetLocked) setClientModalOpen(true);
   }
 
   function openPetSearch() {
-    if (!appointmentSaleLocked && selectedCustomer) setPetModalOpen(true);
+    if (!customerPetLocked && selectedCustomer) setPetModalOpen(true);
   }
 
   function orderCodeFromDigits(value: string) {
@@ -2416,10 +2488,10 @@ function CashPointOfSaleLayout({ cashSession, query, setQuery, loadedSale, waiti
               <label className="grid min-w-0 gap-2"><span className="font-semibold">Usuário</span><div className="field flex h-12 w-full items-center bg-white px-6 text-lg">{session.user.name}</div></label>
               <label className="grid min-w-0 gap-2"><span className="font-semibold">Loja</span><div className="field flex h-12 w-full items-center bg-white px-6 text-lg">01</div></label>
             </div>
-            {appointmentSaleLocked ? <div className="mt-4 grid gap-4 md:grid-cols-2">
+            {customerPetLocked ? <div className="mt-4 grid gap-4 md:grid-cols-2">
               <label className="grid min-w-0 gap-2"><span className="font-semibold">Cliente</span><div className="field flex h-12 w-full items-center gap-3 bg-white px-5 text-lg"><input className="min-w-0 flex-1 cursor-default bg-transparent outline-none" readOnly value={selectedCustomer ? `${customerCode(selectedCustomer)} - ${selectedCustomer.name}` : ""} /><Lock size={22} className="text-slate-500" /></div></label>
               <label className="grid min-w-0 gap-2"><span className="font-semibold">Pet</span><div className="field flex h-12 w-full items-center gap-3 bg-white px-5 text-lg"><input className="min-w-0 flex-1 cursor-default bg-transparent outline-none" readOnly value={loadedSale?.pet?.name ?? selectedPet?.name ?? ""} /><Lock size={22} className="text-slate-500" /></div></label>
-              <p className="flex items-center gap-2 text-xs font-medium text-slate-500 md:col-span-2"><Lock size={14} /> Dados vinculados ao atendimento finalizado.</p>
+              <p className="flex items-center gap-2 text-xs font-medium text-slate-500 md:col-span-2"><Lock size={14} /> {loadedSale?.membershipPurchase ? "Tutor e pet vinculados ao plano mensalista." : "Dados vinculados ao atendimento finalizado."}</p>
             </div> : <div className="mt-4 grid gap-4 md:grid-cols-2">
               <label className="grid min-w-0 gap-2"><span className="font-semibold">Cliente</span><div className="field flex h-12 w-full items-center gap-3 bg-white px-5 text-lg"><input className="min-w-0 flex-1 bg-transparent outline-none" readOnly placeholder="Pesquisar cliente por código, nome, CPF ou telefone..." value={selectedCustomer ? `${customerCode(selectedCustomer)} - ${selectedCustomer.name}` : ""} onFocus={() => setClientModalOpen(true)} onClick={() => setClientModalOpen(true)} /><button type="button" onClick={() => setClientModalOpen(true)}><Search size={22} className="text-slate-900" /></button></div></label>
               <label className="grid min-w-0 gap-2"><span className="font-semibold">Pet</span><div className="field flex h-12 w-full items-center gap-3 bg-white px-5 text-lg"><input className="min-w-0 flex-1 bg-transparent outline-none" readOnly placeholder="Pesquisar pet por nome..." value={selectedPet?.name ?? ""} onFocus={() => selectedCustomer && setPetModalOpen(true)} onClick={() => selectedCustomer && setPetModalOpen(true)} /><button type="button" onClick={() => selectedCustomer && setPetModalOpen(true)}><Search size={22} className="text-slate-900" /></button></div></label>
@@ -2436,7 +2508,7 @@ function CashPointOfSaleLayout({ cashSession, query, setQuery, loadedSale, waiti
         </div>
 
         <div className="grid gap-3">
-          <section className="overflow-hidden rounded-lg border border-slate-300 bg-white">
+          <section className="cash-items-responsive overflow-hidden rounded-lg border border-slate-300 bg-white">
             <div className="grid grid-cols-[70px_110px_minmax(240px,1fr)_140px_160px_160px] border-b border-slate-300 bg-slate-50 px-4 py-4 text-base font-bold"><span /><span className="text-center">Código</span><span>Nome</span><span className="text-center">Quantidade</span><span className="text-center">Valor Unitário</span><span className="text-center">Valor total</span></div>
             <div className="divide-y divide-slate-200">
               {Array.from({ length: Math.max(9, cart.length) }).map((_, index) => {
@@ -3306,6 +3378,7 @@ function CashReports({ isAdmin, cashSession, closingReport = false, onDismiss }:
     { label: "Cartão Crédito", value: reportData?.totalsByMethod?.CREDIT ?? 0 },
     { label: "Transferência", value: reportData?.totalsByMethod?.TRANSFER ?? 0 },
     { label: "Cancelados", value: reportData?.cancelledTotal ?? 0 },
+    { label: "Estornos", value: reportData?.refundedTotal ?? 0 },
     { label: "Desconto", value: reportData?.discountsTotal ?? 0 },
     { label: "Total", value: reportData?.totalReceived ?? 0 }
   ];
@@ -3316,7 +3389,8 @@ function CashReports({ isAdmin, cashSession, closingReport = false, onDismiss }:
     {(loading || refreshing) && <div className="panel p-5 text-sm text-slate-600">Atualizando o relatório do período selecionado...</div>}
     {!loading && !refreshing && !closingReport && (reportData?.sessions ?? []).length > 0 && <div className="panel flex flex-wrap gap-x-6 gap-y-2 p-4 text-sm">{(reportData?.sessions ?? []).map((item) => <p key={item.id}><b>Relatório:</b> {closingReportCode(item)} · <b>Caixa:</b> {cashSessionCode(item)}</p>)}</div>}
     {!loading && !refreshing && <>{(reportData?.sessions ?? []).map((reportSession) => <div className="panel grid gap-2 p-4 text-sm md:grid-cols-4" key={reportSession.id}><p><b>Caixa:</b> {cashSessionCode(reportSession)}</p><p><b>Abertura:</b> {dateTimeBR(reportSession.openedAt)}</p><p><b>Fechamento:</b> {reportSession.closedAt ? dateTimeBR(reportSession.closedAt) : "Em operação"}</p><p><b>Operador:</b> {reportSession.openedByName ?? "-"}</p><p><b>Valor inicial:</b> {currency(reportSession.openingAmount)}</p>{reportSession.closedAt && <><p><b>Dinheiro esperado:</b> {currency(reportSession.expectedCashAmount ?? 0)}</p><p><b>Dinheiro contado:</b> {currency(reportSession.closingCashAmount ?? 0)}</p><p><b>Diferença:</b> {currency(reportSession.difference ?? 0)}</p></>}</div>)}<div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">{summaryCards.map((card) => <div className="panel min-w-0 p-4" key={card.label}><p className="text-sm font-medium text-slate-500">{card.label}</p><b className="mt-1 block whitespace-nowrap text-lg">{currency(card.value)}</b></div>)}</div>
-    {paymentGroups.length > 0 && <div className="grid gap-4 lg:grid-cols-2">{paymentGroups.map((group) => <PaymentReportGroup key={group.key} title={group.title} method={group.method} payments={group.payments} />)}</div>}</>}
+    {paymentGroups.length > 0 && <div className="grid gap-4 lg:grid-cols-2">{paymentGroups.map((group) => <PaymentReportGroup key={group.key} title={group.title} method={group.method} payments={group.payments} />)}</div>}
+    {(reportData?.refundDetails ?? []).length > 0 && <section className="panel overflow-hidden"><div className="border-b border-red-200 bg-red-50 p-3"><h3 className="font-semibold text-red-900">Estornos realizados</h3></div><div className="divide-y divide-slate-100">{reportData!.refundDetails.map((refund) => <div className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm" key={refund.id}><p><b>{dateTimeBR(refund.refundedAt)}</b> | <b>PD-{String(refund.saleCode ?? 0).padStart(6, "0")}</b> | {refund.customerName}{refund.petName ? ` | ${refund.petName}` : ""} | Motivo: {refund.reason ?? "-"} | Operador: {refund.operatorName ?? "-"}</p><b className="text-red-700">-{currency(refund.amount)}</b></div>)}</div></section>}</>}
     {!loading && !refreshing && (reportData?.sessions ?? []).some((item) => item.movements?.length) && <section className="panel overflow-hidden"><div className="border-b border-slate-200 bg-slate-50 p-3"><h3 className="font-semibold">Movimentações do caixa</h3></div><div className="divide-y divide-slate-100">{(reportData?.sessions ?? []).flatMap((item) => item.movements ?? []).map((movement) => <div className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm" key={movement.id}><p><b>{dateTimeBR(movement.createdAt)}</b> | {cashMovementLabels[movement.type]} | {movement.reason}{movement.operatorName ? ` | ${movement.operatorName}` : ""}</p><b>{currency(movement.amount)}</b></div>)}</div></section>}
   </div>;
 }
@@ -3365,6 +3439,9 @@ function SaleReceiveModal({ sale, session, cashSession, onClose, onSaved }: { sa
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelPassword, setCancelPassword] = useState("");
+  const [refundOpen, setRefundOpen] = useState(false);
+  const [refundReason, setRefundReason] = useState("");
+  const [refundPassword, setRefundPassword] = useState("");
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const checkoutIdempotencyKey = useRef<string | null>(null);
@@ -3556,6 +3633,24 @@ function SaleReceiveModal({ sale, session, cashSession, onClose, onSaved }: { sa
     }
   }
 
+  async function refundSale() {
+    setMessage("");
+    if (!sale) return;
+    if (!refundReason.trim() || !refundPassword) {
+      setMessage("Informe o motivo e a senha do administrador para realizar o estorno.");
+      return;
+    }
+    try {
+      setSaving(true);
+      await api(`/sales/${sale.id}/refund`, { method: "PATCH", body: JSON.stringify({ reason: refundReason, adminPassword: refundPassword }) });
+      onSaved();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível realizar o estorno.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const title = sale ? `Receber venda ${saleCode(sale)}` : "Nova venda";
   return <Modal title={title} onClose={onClose}><div className="grid gap-4">
     <div className="grid gap-3 rounded-lg bg-slate-50 p-3 text-sm md:grid-cols-2">
@@ -3640,10 +3735,19 @@ function SaleReceiveModal({ sale, session, cashSession, onClose, onSaved }: { sa
       <div className="grid gap-3"><textarea className="field" placeholder="Motivo obrigatório" value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} /><input className="field" type="password" placeholder="Senha do administrador" value={cancelPassword} onChange={(event) => setCancelPassword(event.target.value)} /><button className="btn btn-primary justify-self-start" type="button" onClick={cancelSale}>Confirmar cancelamento</button></div>
     </div>}
 
+    {refundOpen && sale && <div className="rounded-lg border border-red-300 bg-red-50 p-3">
+      <h3 className="mb-1 font-semibold text-red-900">Estornar venda {saleCode(sale)}</h3>
+      <p className="mb-3 text-sm text-red-800">O estorno ficará registrado no histórico e no relatório do Caixa. Produtos voltarão ao estoque. Se for uma mensalidade, o plano e seus agendamentos reservados serão cancelados.</p>
+      <div className="grid gap-3"><textarea className="field" placeholder="Motivo obrigatório do estorno" value={refundReason} onChange={(event) => setRefundReason(event.target.value)} /><input className="field" type="password" placeholder="Senha do administrador" value={refundPassword} onChange={(event) => setRefundPassword(event.target.value)} /><button className="btn btn-primary justify-self-start" disabled={saving} type="button" onClick={refundSale}>{saving ? "Estornando..." : "Confirmar estorno"}</button></div>
+    </div>}
+
+    {sale?.status === "REFUNDED" && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900"><b>Venda estornada</b><p>Data: {sale.refundedAt ? dateTimeBR(sale.refundedAt) : "-"}</p><p>Operador: {sale.refundedByName ?? "-"}</p><p>Motivo: {sale.refundReason ?? "-"}</p></div>}
+
     {message && <p className={`rounded-md px-3 py-2 text-sm ${message.includes("Falha") || message.includes("exige") || message.includes("Informe") || message.includes("insuficiente") ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>{message}</p>}
     <div className="flex flex-wrap justify-end gap-2">
       <button className="btn btn-secondary" type="button" onClick={onClose}>Fechar</button>
-      {sale?.id && sale.status !== "CANCELLED" && <button className="btn btn-secondary" type="button" onClick={() => setCancelOpen(!cancelOpen)}>Cancelar venda</button>}
+      {sale?.id && !["PAID", "CANCELLED", "REFUNDED"].includes(sale.status) && <button className="btn btn-secondary" type="button" onClick={() => setCancelOpen(!cancelOpen)}>Cancelar venda</button>}
+      {sale?.id && sale.status === "PAID" && <button className="btn btn-secondary text-red-700" type="button" onClick={() => setRefundOpen(!refundOpen)}>Estornar</button>}
       {!readOnly && <button className="btn btn-secondary" disabled={saving} type="button" onClick={() => pendingOpen ? saveSale(paidEntered > 0 ? "PARTIALLY_PAID" : "PENDING") : setPendingOpen(true)}>{pendingOpen ? "Confirmar pagamento para depois" : "Pagar depois"}</button>}
       {!readOnly && <button className="btn btn-primary" disabled={saving} type="button" onClick={() => saveSale("PAID")}>{saving ? "Processando..." : <>Finalizar venda{primaryPaymentMethod === "PIX" ? " no PIX" : ""}</>}</button>}
     </div>
@@ -4116,7 +4220,7 @@ export function App() {
     return ({
       dashboard: <Dashboard />,
       customers: <Customers />,
-      memberships: <Memberships onCreateCustomer={() => setPage("customers")} />,
+      memberships: <Memberships onCreateCustomer={() => setPage("customers")} onOpenSale={(saleId) => { setCheckoutDraft(null); setCheckoutSaleId(saleId); window.history.replaceState(null, "", `${window.location.pathname}?pedido=${saleId}`); setPage("checkout"); }} />,
       appointments: <Appointments onRenewMembership={() => setPage("memberships")} onCharge={(appointment) => { const saleId = appointment.sales?.[0]?.id ?? null; setCheckoutDraft(appointment); setCheckoutSaleId(saleId); if (saleId) window.history.replaceState(null, "", `${window.location.pathname}?pedido=${saleId}`); setPage("checkout"); }} />,
       products: <Catalog isAdmin={session?.user.role === "ADMIN"} />
     })[page] ?? <Dashboard />;

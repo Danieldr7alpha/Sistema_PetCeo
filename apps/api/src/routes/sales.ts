@@ -163,7 +163,8 @@ const receivableSaleInclude = {
   appointment: { include: { service: true } },
   payments: { orderBy: { paidAt: "asc" as const } },
   items: { include: { service: true, product: true }, orderBy: { createdAt: "asc" as const } },
-  receipt: true
+  receipt: true,
+  membershipPurchase: { select: { id: true, status: true } }
 };
 
 function receivableError(res: Response, sale: { status: typeof saleStatuses[number]; internalCode: number | null; paidAt?: Date | null; paidAmount?: unknown; receipt?: { receiptCode: number } | null }) {
@@ -288,15 +289,17 @@ async function addCustomerHistory(data: {
 async function completeMembershipRenewalOnce(db: any, cid: string, appointmentId: string, operatorId?: string) {
   const renewal = await db.membershipRenewal.findFirst({
     where: { companyId: cid, appointmentId },
-    include: { plan: true }
+    include: { plan: true, appointment: true }
   });
   if (!renewal || renewal.status === "PAID") return renewal;
   await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${renewal.id}))`;
-  const current = await db.membershipRenewal.findUnique({ where: { id: renewal.id }, include: { plan: true } });
+  const current = await db.membershipRenewal.findUnique({ where: { id: renewal.id }, include: { plan: true, appointment: true } });
   if (!current || current.status === "PAID") return current;
   const startDate = new Date();
   const endDate = new Date(startDate.getTime() + current.plan.validityDays * 24 * 60 * 60 * 1000);
   const totalUses = current.plan.usageQuantity;
+  const scheduledRenewal = current.appointment.status === "SCHEDULED";
+  const renewalSale = await db.sale.findFirst({ where: { companyId: cid, appointmentId }, select: { id: true } });
   const membership = await db.customerMembership.create({
     data: {
       companyId: cid,
@@ -306,9 +309,12 @@ async function completeMembershipRenewalOnce(db: any, cid: string, appointmentId
       startDate,
       endDate,
       totalUses,
-      usedUses: 1,
-      remainingUses: Math.max(0, totalUses - 1),
-      status: "ACTIVE"
+      usedUses: scheduledRenewal ? 0 : 1,
+      remainingUses: scheduledRenewal ? totalUses : Math.max(0, totalUses - 1),
+      status: "ACTIVE",
+      preferredWeekday: current.appointment.date.getDay(),
+      preferredTime: current.appointment.startTime,
+      purchaseSaleId: renewalSale?.id
     }
   });
   await db.membershipUsage.create({
@@ -318,15 +324,26 @@ async function completeMembershipRenewalOnce(db: any, cid: string, appointmentId
       appointmentId,
       petId: current.petId,
       serviceId: current.plan.serviceId,
-      status: "CONSUMED",
-      usageNumber: 1,
+      status: scheduledRenewal ? "RESERVED" : "CONSUMED",
+      usageNumber: scheduledRenewal ? undefined : 1,
       balanceBefore: totalUses,
-      balanceAfter: Math.max(0, totalUses - 1),
-      consumedAt: new Date(),
+      balanceAfter: scheduledRenewal ? undefined : Math.max(0, totalUses - 1),
+      consumedAt: scheduledRenewal ? undefined : new Date(),
       operatorId
     }
   });
   await db.appointment.update({ where: { id: appointmentId }, data: { membershipId: membership.id, paymentMode: "PACKAGE" } });
+  if (scheduledRenewal) {
+    const weekInterval = Math.max(1, Math.round(current.plan.suggestedFrequencyDays / 7));
+    for (let index = 1; index < totalUses; index += 1) {
+      const date = new Date(current.appointment.date); date.setDate(date.getDate() + index * weekInterval * 7);
+      const next = await db.appointment.create({ data: { companyId: cid, customerId: current.customerId, petId: current.petId, serviceId: current.plan.serviceId, membershipId: membership.id, date, startTime: current.appointment.startTime, status: "SCHEDULED", paymentStatus: "NOT_REQUIRED", paymentMode: "PACKAGE", notes: `Agendamento automático do plano ${current.plan.name}` } });
+      await db.membershipUsage.create({ data: { companyId: cid, membershipId: membership.id, appointmentId: next.id, petId: current.petId, serviceId: current.plan.serviceId, status: "RESERVED", balanceBefore: totalUses, operatorId } });
+    }
+    const reminderDate = new Date(current.appointment.date); reminderDate.setDate(reminderDate.getDate() + totalUses * weekInterval * 7);
+    const reminder = await db.appointment.create({ data: { companyId: cid, customerId: current.customerId, petId: current.petId, serviceId: current.plan.serviceId, membershipId: membership.id, date: reminderDate, startTime: current.appointment.startTime, status: "SCHEDULED", paymentStatus: "PENDING", paymentMode: "RENEWAL_AT_CHECKOUT", notes: `Renovação programada do plano ${current.plan.name}` } });
+    await db.membershipRenewal.create({ data: { companyId: cid, customerId: current.customerId, petId: current.petId, planId: current.planId, appointmentId: reminder.id, priceSnapshot: current.plan.price, createdById: operatorId } });
+  }
   await db.membershipRenewal.update({ where: { id: current.id }, data: { status: "PAID", membershipId: membership.id, paidAt: new Date() } });
   await db.customerHistory.create({
     data: {
@@ -336,10 +353,48 @@ async function completeMembershipRenewalOnce(db: any, cid: string, appointmentId
       appointmentId,
       membershipId: membership.id,
       type: "MEMBERSHIP_RENEWAL",
-      title: "Mensalidade renovada e primeiro uso consumido",
+      title: scheduledRenewal ? "Mensalidade renovada" : "Mensalidade renovada e primeiro uso consumido",
       description: `${current.plan.name} · Uso 1 de ${totalUses} · Saldo: ${totalUses} → ${Math.max(0, totalUses - 1)}`
     }
   });
+  return membership;
+}
+
+async function completeMembershipPurchaseOnce(db: any, cid: string, saleId: string, operatorId?: string) {
+  const pending = await db.customerMembership.findFirst({ where: { companyId: cid, purchaseSaleId: saleId, status: "PENDING_PAYMENT" }, include: { plan: true } });
+  if (!pending) return null;
+  await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${pending.id}))`;
+  const membership = await db.customerMembership.findUnique({ where: { id: pending.id }, include: { plan: true } });
+  if (!membership || membership.status !== "PENDING_PAYMENT") return membership;
+  const startDate = new Date();
+  const endDate = new Date(startDate.getTime() + membership.plan.validityDays * 86_400_000);
+  const weekday = membership.preferredWeekday ?? startDate.getDay();
+  const time = membership.preferredTime ?? "09:00";
+  const dateInSaoPaulo = (date: Date) => { const parts = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date); const value = (type: string) => parts.find((part) => part.type === type)?.value; return `${value("year")}-${value("month")}-${value("day")}`; };
+  const localToday = dateInSaoPaulo(startDate);
+  const firstDate = new Date(`${localToday}T12:00:00-03:00`);
+  firstDate.setDate(firstDate.getDate() + ((weekday - firstDate.getDay() + 7) % 7));
+  const firstTime = new Date(`${dateInSaoPaulo(firstDate)}T${time}:00-03:00`);
+  if (firstTime <= startDate) firstDate.setDate(firstDate.getDate() + 7);
+  const weekInterval = Math.max(1, Math.round(membership.plan.suggestedFrequencyDays / 7));
+  for (let index = 0; index < membership.totalUses; index += 1) {
+    const appointmentDate = new Date(firstDate); appointmentDate.setDate(firstDate.getDate() + index * weekInterval * 7);
+    const appointment = await db.appointment.create({ data: {
+      companyId: cid, customerId: membership.customerId, petId: membership.petId, serviceId: membership.plan.serviceId,
+      membershipId: membership.id, date: appointmentDate, startTime: time, status: "SCHEDULED", paymentStatus: "NOT_REQUIRED", paymentMode: "PACKAGE",
+      notes: `Agendamento automático do plano ${membership.plan.name}`
+    } });
+    await db.membershipUsage.create({ data: { companyId: cid, membershipId: membership.id, appointmentId: appointment.id, petId: membership.petId, serviceId: membership.plan.serviceId, status: "RESERVED", balanceBefore: membership.totalUses, operatorId } });
+  }
+  const reminderDate = new Date(firstDate); reminderDate.setDate(firstDate.getDate() + membership.totalUses * weekInterval * 7);
+  const reminder = await db.appointment.create({ data: {
+    companyId: cid, customerId: membership.customerId, petId: membership.petId, serviceId: membership.plan.serviceId,
+    membershipId: membership.id, date: reminderDate, startTime: time, status: "SCHEDULED", paymentStatus: "PENDING", paymentMode: "RENEWAL_AT_CHECKOUT",
+    notes: `Renovação programada do plano ${membership.plan.name}`
+  } });
+  await db.membershipRenewal.create({ data: { companyId: cid, customerId: membership.customerId, petId: membership.petId, planId: membership.planId, appointmentId: reminder.id, priceSnapshot: membership.plan.price, createdById: operatorId } });
+  await db.customerMembership.update({ where: { id: membership.id }, data: { status: "ACTIVE", startDate, endDate, appointmentsGeneratedAt: new Date() } });
+  await db.customerHistory.create({ data: { companyId: cid, customerId: membership.customerId, petId: membership.petId, membershipId: membership.id, saleId, type: "MEMBERSHIP", title: "Plano mensalista pago e ativado", description: `${membership.plan.name} · ${membership.totalUses} agendamento(s) criado(s) automaticamente` } });
   return membership;
 }
 
@@ -362,6 +417,7 @@ export async function ensureWaitingSaleForFinishedAppointment(cid: string, appoi
       customer: { include: { pets: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] }, memberships: { include: { plan: { include: { service: true } }, pet: true } } } },
       pet: true,
       appointment: { include: { service: true } },
+      membershipPurchase: { select: { id: true, status: true } },
       payments: { orderBy: { paidAt: "asc" } },
       items: { include: { service: true, product: true }, orderBy: { createdAt: "asc" } },
       receipt: true
@@ -866,6 +922,7 @@ salesRouter.get("/", async (req, res) => {
       customer: { include: { pets: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] }, memberships: { include: { plan: { include: { service: true } }, pet: true } } } },
       pet: true,
       appointment: { include: { service: true } },
+      membershipPurchase: { select: { id: true, status: true } },
       payments: { orderBy: { paidAt: "asc" } },
       items: { include: { service: true, product: true }, orderBy: { createdAt: "asc" } }
     },
@@ -1142,7 +1199,7 @@ salesRouter.patch("/:id/checkout", async (req, res) => {
     const body = checkoutSchema.parse(req.body);
     const sale = await prisma.sale.findFirst({
       where: { id: req.params.id, companyId: cid },
-      include: { items: { orderBy: { createdAt: "asc" } }, payments: true, receipt: true, appointment: { include: { membershipUsage: true, membershipRenewal: true } } }
+      include: { items: { orderBy: { createdAt: "asc" } }, payments: true, receipt: true, membershipPurchase: { select: { id: true, status: true } }, appointment: { include: { membershipUsage: true, membershipRenewal: true } } }
     });
     if (!sale) return res.status(404).json({ message: "Venda não encontrada" });
     if (sale.status === "PAID" && req.header("Idempotency-Key")) {
@@ -1152,10 +1209,11 @@ salesRouter.patch("/:id/checkout", async (req, res) => {
       return res.status(409).json({ message: "Venda paga ou cancelada não pode ser alterada." });
     }
     const lockedAppointmentSale = sale.origin === "AGENDA" && sale.appointmentId && sale.appointment?.status === "FINISHED";
+    const lockedMembershipSale = Boolean(sale.membershipPurchase);
     const changesLinkedCustomer = body.customerId !== undefined && body.customerId !== sale.customerId;
     const changesLinkedPet = body.petId !== undefined && body.petId !== sale.petId;
     const changesLinkedAppointment = body.appointmentId !== undefined && body.appointmentId !== sale.appointmentId;
-    if (lockedAppointmentSale && (changesLinkedCustomer || changesLinkedPet || changesLinkedAppointment)) {
+    if ((lockedAppointmentSale || lockedMembershipSale) && (changesLinkedCustomer || changesLinkedPet || changesLinkedAppointment)) {
       return res.status(409).json({ message: "Cliente e pet não podem ser alterados em pedido vinculado a atendimento finalizado." });
     }
     const cashSession = await requireOpenCashSession(cid);
@@ -1278,6 +1336,9 @@ salesRouter.patch("/:id/checkout", async (req, res) => {
       if (transactionSale.appointmentId && transactionSale.status === "PAID") {
         await completeMembershipRenewalOnce(tx, cid, transactionSale.appointmentId, req.user?.userId);
       }
+      if (transactionSale.status === "PAID") {
+        await completeMembershipPurchaseOnce(tx, cid, transactionSale.id, req.user?.userId);
+      }
       markStep("stock-and-membership");
       await updateAppointmentPayment(cid, transactionSale.appointmentId, transactionSale.status, tx);
       const receipt = transactionSale.status === "PAID"
@@ -1312,6 +1373,69 @@ salesRouter.patch("/:id/checkout", async (req, res) => {
   }
 });
 
+salesRouter.patch("/:id/refund", async (req, res) => {
+  const cid = companyId(req);
+  const body = z.object({ adminPassword: z.string().min(1), reason: z.string().trim().min(3) }).parse(req.body);
+  if (!(await validateAdminPassword(cid, body.adminPassword))) {
+    return res.status(403).json({ message: "Senha do administrador incorreta." });
+  }
+  const cashSession = await requireOpenCashSession(cid);
+  const operator = await operatorData(req);
+  try {
+    const refunded = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`refund:${cid}:${req.params.id}`}))`;
+      const sale = await tx.sale.findFirst({
+        where: { id: req.params.id, companyId: cid },
+        include: { membershipPurchase: true, payments: true, items: true, customer: true, pet: true }
+      });
+      if (!sale) throw Object.assign(new Error("Venda não encontrada."), { statusCode: 404 });
+      if (sale.status === "REFUNDED") return sale;
+      if (sale.status !== "PAID") throw Object.assign(new Error("Somente uma venda paga pode ser estornada."), { statusCode: 409 });
+
+      const membership = sale.membershipPurchase;
+      const reservedUsages = membership ? await tx.membershipUsage.findMany({ where: { membershipId: membership.id, status: "RESERVED" }, select: { id: true, appointmentId: true } }) : [];
+      const appointmentIds = reservedUsages.map((usage) => usage.appointmentId);
+      if (appointmentIds.length) {
+        await tx.appointment.updateMany({ where: { id: { in: appointmentIds }, companyId: cid, status: { in: ["SCHEDULED", "ARRIVED"] } }, data: { status: "CANCELLED" } });
+        await tx.membershipUsage.updateMany({ where: { id: { in: reservedUsages.map((usage) => usage.id) } }, data: { status: "RELEASED", releasedAt: new Date(), operatorId: req.user?.userId } });
+      }
+      if (membership) await tx.customerMembership.update({ where: { id: membership.id }, data: { status: "CANCELLED" } });
+
+      for (const item of sale.items) {
+        if (item.itemType === "PRODUCT" && item.productId) {
+          await tx.product.updateMany({ where: { id: item.productId, companyId: cid }, data: { stock: { increment: item.quantity } } });
+        }
+      }
+
+      const cashRefund = sale.payments.filter((payment) => payment.method === "CASH").reduce((sum, payment) => sum + Number(payment.amount), 0);
+      if (cashRefund > 0) {
+        await tx.cashMovement.create({ data: {
+          companyId: cid, cashSessionId: cashSession.id, type: "CASH_OUT", amount: cashRefund,
+          reason: `Estorno PD-${String(sale.internalCode ?? 0).padStart(6, "0")}`,
+          notes: body.reason, operatorId: operator.operatorId, operatorName: operator.operatorName
+        } });
+      }
+
+      const updated = await tx.sale.update({
+        where: { id: sale.id },
+        data: { status: "REFUNDED", paymentStatus: "CANCELLED", refundReason: body.reason, refundedAt: new Date(), refundedByName: operator.operatorName, refundCashSessionId: cashSession.id }
+      });
+      await tx.salesReceipt.updateMany({ where: { saleId: sale.id, companyId: cid }, data: { status: "REFUNDED" } });
+      if (sale.appointmentId) await tx.appointment.updateMany({ where: { id: sale.appointmentId, companyId: cid }, data: { paymentStatus: "CANCELLED" } });
+      if (sale.customerId) await tx.customerHistory.create({ data: {
+        companyId: cid, customerId: sale.customerId, petId: sale.petId, saleId: sale.id, membershipId: membership?.id,
+        type: "SALE_REFUND", title: "Venda estornada",
+        description: `Pedido PD-${String(sale.internalCode ?? 0).padStart(6, "0")} estornado por ${operator.operatorName}. Motivo: ${body.reason}.${membership ? ` Plano mensalista cancelado e ${appointmentIds.length} agendamento(s) desfeito(s).` : ""}`,
+        amount: -Number(sale.paidAmount)
+      } });
+      return updated;
+    }, { maxWait: 10000, timeout: 20000 });
+    res.json(refunded);
+  } catch (error) {
+    return handleRouteError(error, req, res);
+  }
+});
+
 salesRouter.patch("/:id/cancel", async (req, res) => {
   const cid = companyId(req);
   const body = z.object({ adminPassword: z.string().min(1), reason: z.string().min(3) }).parse(req.body);
@@ -1339,6 +1463,7 @@ salesRouter.patch("/:id/cancel", async (req, res) => {
     include: { customer: { include: { pets: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] }, memberships: { include: { plan: { include: { service: true } }, pet: true } } } }, pet: true, appointment: true, payments: { orderBy: { paidAt: "asc" } }, items: { include: { service: true, product: true } } }
   });
   await updateAppointmentPayment(cid, updated.appointmentId, "CANCELLED");
+  await prisma.customerMembership.updateMany({ where: { companyId: cid, purchaseSaleId: updated.id, status: "PENDING_PAYMENT" }, data: { status: "CANCELLED" } });
   await addCustomerHistory({
     companyId: cid,
     customerId: updated.customerId,

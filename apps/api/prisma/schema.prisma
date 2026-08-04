@@ -561,25 +561,30 @@ model MembershipPlan {
 }
 
 model CustomerMembership {
-  id            String              @id @default(cuid())
-  companyId     String
-  customerId    String
-  petId         String
-  planId        String
-  startDate     DateTime
-  endDate       DateTime
-  totalUses     Int
-  usedUses      Int                 @default(0)
-  remainingUses Int
-  status        MembershipStatus    @default(ACTIVE)
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  customer      Customer            @relation(fields: [customerId], references: [id])
-  pet           Pet                 @relation(fields: [petId], references: [id])
-  plan          MembershipPlan      @relation(fields: [planId], references: [id])
-  usages        MembershipUsage[]
-  appointments  Appointment[]
-  renewals      MembershipRenewal[]
+  id                      String              @id @default(cuid())
+  companyId               String
+  customerId              String
+  petId                   String
+  planId                  String
+  startDate               DateTime
+  endDate                 DateTime
+  totalUses               Int
+  usedUses                Int                 @default(0)
+  remainingUses           Int
+  status                  MembershipStatus    @default(ACTIVE)
+  preferredWeekday        Int?
+  preferredTime           String?
+  purchaseSaleId          String?             @unique
+  appointmentsGeneratedAt DateTime?
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+  customer                Customer            @relation(fields: [customerId], references: [id])
+  pet                     Pet                 @relation(fields: [petId], references: [id])
+  plan                    MembershipPlan      @relation(fields: [planId], references: [id])
+  usages                  MembershipUsage[]
+  appointments            Appointment[]
+  renewals                MembershipRenewal[]
+  purchaseSale            Sale?               @relation("MembershipPurchaseSale", fields: [purchaseSaleId], references: [id])
 }
 
 model Appointment {
@@ -674,7 +679,7 @@ model MembershipUsage {
 }
 
 model Sale {
-  id                  String         @id @default(cuid())
+  id                  String              @id @default(cuid())
   companyId           String
   internalCode        Int?
   cashSessionId       String?
@@ -682,17 +687,17 @@ model Sale {
   customerId          String?
   petId               String?
   appointmentId       String?
-  subtotal            Decimal        @default(0) @db.Decimal(10, 2)
-  total               Decimal        @default(0) @db.Decimal(10, 2)
-  paidAmount          Decimal        @default(0) @db.Decimal(10, 2)
-  pendingAmount       Decimal        @default(0) @db.Decimal(10, 2)
-  discount            Decimal        @default(0) @db.Decimal(10, 2)
-  discountType        DiscountType   @default(VALUE)
-  discountPercent     Decimal?       @db.Decimal(5, 2)
+  subtotal            Decimal             @default(0) @db.Decimal(10, 2)
+  total               Decimal             @default(0) @db.Decimal(10, 2)
+  paidAmount          Decimal             @default(0) @db.Decimal(10, 2)
+  pendingAmount       Decimal             @default(0) @db.Decimal(10, 2)
+  discount            Decimal             @default(0) @db.Decimal(10, 2)
+  discountType        DiscountType        @default(VALUE)
+  discountPercent     Decimal?            @db.Decimal(5, 2)
   paymentMethod       PaymentMethod?
-  paymentStatus       PaymentStatus  @default(PAID)
-  status              SaleStatus     @default(PAID)
-  origin              SaleOrigin     @default(DIRECT)
+  paymentStatus       PaymentStatus       @default(PAID)
+  status              SaleStatus          @default(PAID)
+  origin              SaleOrigin          @default(DIRECT)
   pendingReason       String?
   pendingNotes        String?
   pendingSince        DateTime?
@@ -705,17 +710,22 @@ model Sale {
   operatorName        String?
   paidAt              DateTime?
   cancelledAt         DateTime?
+  refundReason        String?
+  refundedAt          DateTime?
+  refundedByName      String?
+  refundCashSessionId String?
   stockProcessedAt    DateTime?
-  createdAt           DateTime       @default(now())
-  updatedAt           DateTime       @updatedAt
-  customer            Customer?      @relation(fields: [customerId], references: [id])
-  pet                 Pet?           @relation(fields: [petId], references: [id])
-  appointment         Appointment?   @relation(fields: [appointmentId], references: [id])
-  cashSession         CashSession?   @relation(fields: [cashSessionId], references: [id])
-  preSale             PreSale?       @relation(fields: [preSaleId], references: [id])
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  customer            Customer?           @relation(fields: [customerId], references: [id])
+  pet                 Pet?                @relation(fields: [petId], references: [id])
+  appointment         Appointment?        @relation(fields: [appointmentId], references: [id])
+  cashSession         CashSession?        @relation(fields: [cashSessionId], references: [id])
+  preSale             PreSale?            @relation(fields: [preSaleId], references: [id])
   items               SaleItem[]
   payments            SalePayment[]
   receipt             SalesReceipt?
+  membershipPurchase  CustomerMembership? @relation("MembershipPurchaseSale")
 
   @@unique([companyId, internalCode])
   @@unique([companyId, appointmentId])
@@ -725,6 +735,8 @@ model Sale {
   @@index([companyId, customerId])
   @@index([companyId, petId])
   @@index([companyId, cashSessionId])
+  @@index([companyId, refundedAt])
+  @@index([companyId, refundCashSessionId])
   @@index([companyId, preSaleId])
 }
 

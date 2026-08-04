@@ -18,7 +18,6 @@ const cashSubmenus = [
   { key: "checkout:pending", label: "Pedidos Pendentes" },
   { key: "checkout:reports", label: "Relatório" },
   { key: "checkout:closing-reports", label: "Relatórios de fechamento" },
-  { key: "financial:methods", label: "Formas de Pagamento" },
   { key: "checkout:withdrawal", label: "Sangria" },
   { key: "checkout:supply", label: "Suprimento" },
   { key: "checkout:transfer", label: "Transferência" },
@@ -104,14 +103,10 @@ export function Layout({ session, active, onNavigate, onLogout, children }: Prop
 
   return (
     <div className="min-h-screen lg:flex">
-      <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 px-4 shadow-sm backdrop-blur lg:hidden">
-        <div><strong className="block text-brand-700">CEO Pet AI</strong><span className="block max-w-[230px] truncate text-xs text-slate-500">{session.company.name}</span></div>
-        <button className="btn btn-secondary !h-11 !w-11 !p-0" onClick={() => setOpen(true)} aria-label="Abrir menu"><Menu size={22} /></button>
-      </header>
       <div className="fixed inset-y-0 left-0 z-30 hidden lg:block">{sidebar}</div>
       {open && <div className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-[1px] lg:hidden" onClick={() => setOpen(false)}><div className="h-full shadow-2xl" onClick={(e) => e.stopPropagation()}>{sidebar}</div></div>}
-      <main className="min-w-0 flex-1 px-3 pb-24 pt-4 sm:px-5 sm:pt-5 md:px-8 lg:ml-72 lg:p-6">{children}</main>
-      <nav className="mobile-app-nav fixed inset-x-0 bottom-0 z-30 flex border-t border-slate-200 bg-white/95 px-1 pb-[max(6px,env(safe-area-inset-bottom))] pt-1 shadow-[0_-4px_18px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
+      <main className="min-w-0 flex-1 px-3 pb-24 pt-4 sm:px-5 md:px-6 md:pt-6 lg:ml-72 lg:p-6">{children}</main>
+      <nav className="mobile-app-nav fixed inset-x-0 bottom-0 z-30 flex border-t border-slate-200 bg-white/95 px-1 pb-[max(6px,env(safe-area-inset-bottom))] pt-1 shadow-[0_-4px_18px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden">
         {[items[0], items[1], items[2], items[5]].filter((item) => canAccess(item.key)).map((item) => { const Icon = item.icon; const selected = item.key === "checkout" ? active.startsWith("checkout") : active === item.key; return <button key={item.key} className={`flex min-h-14 flex-1 flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-medium ${selected ? "bg-brand-50 text-brand-700" : "text-slate-500"}`} onClick={() => onNavigate(item.key)}><Icon size={21} /><span>{item.label}</span></button>; })}
         <button className="flex min-h-14 flex-1 flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-medium text-slate-500" onClick={() => setOpen(true)}><Menu size={21} /><span>Menu</span></button>
       </nav>

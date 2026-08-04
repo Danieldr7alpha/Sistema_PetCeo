@@ -23,6 +23,14 @@ function localDateInput(date = new Date()) {
   return new Date(date.getTime() - timezoneOffset).toISOString().slice(0, 10);
 }
 
+function shiftedEndTime(oldStart: string, oldEnd: string | null, newStart: string) {
+  if (!oldEnd) return null;
+  const toMinutes = (value: string) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
+  const duration = Math.max(0, toMinutes(oldEnd) - toMinutes(oldStart));
+  const endMinutes = (toMinutes(newStart) + duration) % (24 * 60);
+  return `${String(Math.floor(endMinutes / 60)).padStart(2, "0")}:${String(endMinutes % 60).padStart(2, "0")}`;
+}
+
 async function lockMembership(tx: any, membershipId: string) {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${membershipId}))`;
 }
@@ -186,6 +194,62 @@ appointmentsRouter.post("/", async (req, res) => {
   }
 });
 
+appointmentsRouter.patch("/:id/reschedule", async (req, res) => {
+  const cid = companyId(req);
+  const body = z.object({
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+    endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional()
+  }).parse(req.body);
+
+  if (body.date < localDateInput()) {
+    return res.status(400).json({ message: "Não é permitido reagendar para uma data que já passou." });
+  }
+
+  const current = await prisma.appointment.findFirst({
+    where: { id: req.params.id, companyId: cid },
+    include: appointmentInclude
+  });
+  if (!current) return res.status(404).json({ message: "Agendamento não encontrado." });
+  if (!current.membershipId || current.membershipUsage?.status !== "RESERVED") {
+    return res.status(409).json({ message: "Somente um atendimento reservado de mensalista pode ser reagendado por esta opção." });
+  }
+  if (current.status !== "SCHEDULED") {
+    return res.status(409).json({ message: "Somente atendimentos que ainda estão agendados podem ser reagendados." });
+  }
+
+  const newDate = new Date(body.date);
+  const duplicate = await prisma.appointment.findFirst({
+    where: {
+      id: { not: current.id }, companyId: cid, petId: current.petId,
+      date: newDate, startTime: body.startTime, status: { not: "CANCELLED" }
+    }
+  });
+  if (duplicate) {
+    return res.status(409).json({ message: "Este pet já possui um agendamento nessa data e horário." });
+  }
+
+  const oldDate = current.date.toLocaleDateString("pt-BR", { timeZone: "UTC" });
+  const adjustedEndTime = body.endTime ?? shiftedEndTime(current.startTime, current.endTime, body.startTime);
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.appointment.update({
+      where: { id: current.id },
+      data: { date: newDate, startTime: body.startTime, endTime: adjustedEndTime }
+    });
+    await tx.customerHistory.create({
+      data: {
+        companyId: cid, customerId: current.customerId, petId: current.petId,
+        appointmentId: current.id, membershipId: current.membershipId,
+        type: "APPOINTMENT_RESCHEDULED", title: "Atendimento de mensalista reagendado",
+        description: `${oldDate} às ${current.startTime} → ${newDate.toLocaleDateString("pt-BR", { timeZone: "UTC" })} às ${body.startTime}`
+      }
+    });
+    return tx.appointment.findUniqueOrThrow({ where: { id: current.id }, include: appointmentInclude });
+  });
+
+  res.json(updated);
+});
+
 appointmentsRouter.patch("/:id/status", async (req, res) => {
   const cid = companyId(req);
   const body = z.object({ status: z.enum(["SCHEDULED", "ARRIVED", "IN_SERVICE", "BATHING", "WAITING_PICKUP", "FINISHED", "CANCELLED"]) }).parse(req.body);
@@ -195,6 +259,7 @@ appointmentsRouter.patch("/:id/status", async (req, res) => {
     const result = await prisma.$transaction(async (tx) => {
       const current = await tx.appointment.findFirst({ where: { id: req.params.id, companyId: cid }, include: appointmentInclude });
       if (!current) throw Object.assign(new Error("Agendamento não encontrado."), { statusCode: 404 });
+      if (body.status === "CANCELLED" && current.membershipId) throw Object.assign(new Error("Atendimento de mensalista já foi pago e não pode ser cancelado pela Agenda. Para cancelar o plano, faça o estorno da venda no Caixa."), { statusCode: 409 });
       if (body.status === "FINISHED" && current.status === "FINISHED") return { appointment: current, consumedNow: false };
 
       const order = ["SCHEDULED", "ARRIVED", "IN_SERVICE", "FINISHED", "CANCELLED"];

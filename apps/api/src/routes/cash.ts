@@ -158,7 +158,6 @@ async function sessionSummary(cid: string, cashSessionId: string) {
     where: { companyId: cid, cashSessionId },
     include: { payments: true, items: { include: { service: true, product: true } }, customer: true, pet: true }
   });
-
   const totalsByMethod = Object.fromEntries(paymentMethods.map((method) => [method, 0])) as Record<typeof paymentMethods[number], number>;
   let pendingTotal = 0;
   let cancelledTotal = 0;
@@ -166,7 +165,7 @@ async function sessionSummary(cid: string, cashSessionId: string) {
   for (const sale of sales) {
     const total = Number(sale.total);
     discountsTotal += Number(sale.discount);
-    if (sale.status !== "CANCELLED" && sale.status !== "REFUNDED" && sale.payments.length) {
+    if (sale.status !== "CANCELLED" && sale.payments.length) {
       for (const payment of sale.payments) totalsByMethod[payment.method] += Number(payment.amount);
     }
     if (sale.status === "PENDING" || sale.status === "PARTIALLY_PAID") pendingTotal += Number(sale.pendingAmount || total);
@@ -210,12 +209,19 @@ async function cashReportSummary(req: Request, res: import("express").Response) 
     where: { companyId: cid, ...cashSessionFilter, ...(cashSessionId ? {} : { createdAt: { gte: from, lte: to } }) },
     include: { items: { include: { service: true, product: true } } }
   });
+  const refundedSales = await prisma.sale.findMany({
+    where: cashSessionId
+      ? { companyId: cid, refundCashSessionId: cashSessionId, status: "REFUNDED" }
+      : { companyId: cid, status: "REFUNDED", refundedAt: { gte: from, lte: to } },
+    include: { customer: true, pet: true },
+    orderBy: { refundedAt: "asc" }
+  });
   const receivedPayments = await prisma.salePayment.findMany({
     where: {
       companyId: cid,
       ...cashSessionFilter,
       ...(cashSessionId ? {} : { paidAt: { gte: from, lte: to } }),
-      sale: { status: { notIn: ["CANCELLED", "REFUNDED"] } }
+      sale: { status: { not: "CANCELLED" } }
     },
     include: { sale: { include: { customer: true, pet: true, receipt: true } } },
     orderBy: { paidAt: "asc" }
@@ -259,7 +265,18 @@ async function cashReportSummary(req: Request, res: import("express").Response) 
     totalReceived: Object.values(totalsByMethod).reduce((sum, value) => sum + value, 0),
     pendingTotal,
     cancelledTotal,
+    refundedTotal: refundedSales.reduce((sum, sale) => sum + Number(sale.paidAmount), 0),
     discountsTotal,
+    refundDetails: refundedSales.map((sale) => ({
+      id: sale.id,
+      saleCode: sale.internalCode,
+      customerName: sale.customer?.name ?? "Consumidor final",
+      petName: sale.pet?.name ?? null,
+      amount: Number(sale.paidAmount),
+      reason: sale.refundReason,
+      refundedAt: sale.refundedAt,
+      operatorName: sale.refundedByName
+    })),
     paymentDetails: receivedPayments.map((payment) => ({
       id: payment.id,
       method: payment.method,
