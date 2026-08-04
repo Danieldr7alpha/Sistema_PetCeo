@@ -2519,7 +2519,7 @@ function CashPointOfSaleLayout({ cashSession, query, setQuery, loadedSale, waiti
             <div><h2 className="font-semibold">Produtos e serviços</h2><p className="text-sm text-slate-500">Pesquise pelo código ou pelo nome para adicionar ao pedido.</p></div>
             <button className="field flex min-h-12 items-center justify-between gap-3 text-left text-slate-500" type="button" onClick={() => setItemOpen(true)}><span>Pesquisar produto ou serviço...</span><Search className="shrink-0 text-slate-900" size={22} /></button>
           </section>
-          <section className="cash-items-responsive overflow-hidden rounded-lg border border-slate-300 bg-white">
+          <section className="hidden overflow-hidden rounded-lg border border-slate-300 bg-white lg:block">
             <div className="grid grid-cols-[70px_110px_minmax(240px,1fr)_140px_160px_160px] border-b border-slate-300 bg-slate-50 px-4 py-4 text-base font-bold"><span /><span className="text-center">Código</span><span>Nome</span><span className="text-center">Quantidade</span><span className="text-center">Valor Unitário</span><span className="text-center">Valor total</span></div>
             <div className="divide-y divide-slate-200">
               {Array.from({ length: Math.max(9, cart.length) }).map((_, index) => {
@@ -2534,6 +2534,19 @@ function CashPointOfSaleLayout({ cashSession, query, setQuery, loadedSale, waiti
                 </div>;
               })}
             </div>
+          </section>
+          <section className="grid gap-3 lg:hidden">
+            {cart.map((item, index) => <article className="panel overflow-hidden" key={`${item.itemType}-${item.code}-${index}`}>
+              <div className="flex items-start justify-between gap-3 border-b border-slate-100 bg-slate-50 p-4">
+                <div className="min-w-0"><span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Código {item.code || "—"}</span><h3 className="mt-1 text-base font-semibold leading-snug text-slate-900">{item.description}</h3>{item.coveredByMembership && <span className="badge mt-2 bg-emerald-50 text-emerald-800">Coberto pelo pacote</span>}</div>
+                <button className="btn btn-secondary !h-11 !w-11 shrink-0 !p-0 text-red-700" type="button" aria-label={`Remover ${item.description}`} onClick={() => setCart(cart.filter((_, itemIndex) => itemIndex !== index))}><Trash2 size={19} /></button>
+              </div>
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-4 p-4">
+                <label className="grid gap-1 text-sm font-medium text-slate-600">Quantidade<input className="field max-w-28 text-center font-semibold" disabled={item.coveredByMembership} inputMode="numeric" value={item.quantity} onChange={(event) => setCart(cart.map((current, itemIndex) => itemIndex === index ? { ...current, quantity: Math.max(1, Number(onlyDigits(event.target.value) || 1)) } : current))} /></label>
+                <div className="grid gap-2 text-right"><p className="text-sm text-slate-500">Unitário <b className="ml-1 text-slate-700">{currency(item.unitPrice)}</b></p><p className="text-sm text-slate-500">Subtotal<br /><b className="text-xl text-slate-900">{currency(item.quantity * item.unitPrice)}</b></p></div>
+              </div>
+            </article>)}
+            {!cart.length && <div className="panel border-dashed p-5 text-center text-sm text-slate-500">Nenhum produto ou serviço adicionado.</div>}
           </section>
         </div>
 
