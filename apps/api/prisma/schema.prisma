@@ -257,6 +257,34 @@ model Company {
   paymentFeeRules         PaymentFeeRule[]
   financialPayables       FinancialPayable[]
   cashRegisters           CashRegister[]
+  customerRegistrationInvites CustomerRegistrationInvite[]
+  systemNotifications     SystemNotification[]
+}
+
+model CustomerRegistrationInvite {
+  id        String    @id @default(cuid())
+  companyId String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, expiresAt])
+}
+
+model SystemNotification {
+  id         String    @id @default(cuid())
+  companyId  String
+  type       String
+  title      String
+  message    String
+  customerId String?
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+  company    Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, readAt, createdAt])
 }
 
 model User {

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
+import crypto from "node:crypto";
 import { companyId, requireAdmin } from "../middleware/auth.js";
 import { prisma } from "../lib/prisma.js";
 
@@ -106,6 +107,17 @@ const customerSchema = z.object({
   neighborhood: z.string().optional(),
   city: z.string().optional(),
   state: z.string().optional()
+});
+
+customersRouter.post("/registration-link", async (req, res) => {
+  const cid = companyId(req);
+  const token = crypto.randomBytes(32).toString("hex");
+  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  await prisma.customerRegistrationInvite.create({ data: { companyId: cid, tokenHash, expiresAt } });
+  const configuredOrigin = process.env.WEB_ORIGIN?.split(",")[0]?.trim();
+  const origin = req.get("origin") || configuredOrigin || "http://127.0.0.1:5174";
+  res.status(201).json({ url: `${origin}/?cadastroCliente=${token}`, expiresAt });
 });
 
 customersRouter.get("/", async (req, res) => {

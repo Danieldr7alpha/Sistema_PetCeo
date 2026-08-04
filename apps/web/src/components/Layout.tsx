@@ -1,6 +1,6 @@
-import { CalendarDays, ChevronDown, ChevronRight, CircleDollarSign, Landmark, LayoutDashboard, Menu, Package, PawPrint, UserCog, Users, X } from "lucide-react";
-import { useState } from "react";
-import type { Session } from "../lib/api";
+import { Bell, CalendarDays, ChevronDown, ChevronRight, CircleDollarSign, Landmark, LayoutDashboard, Menu, Package, PawPrint, UserCog, Users, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { api, dateBR, type Session } from "../lib/api";
 
 const items = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -48,6 +48,11 @@ export function Layout({ session, active, onNavigate, onLogout, children }: Prop
   const [open, setOpen] = useState(false);
   const [cashOpen, setCashOpen] = useState(active.startsWith("checkout"));
   const [financialOpen, setFinancialOpen] = useState(active.startsWith("financial"));
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState<{ items: { id: string; title: string; message: string; readAt?: string | null; createdAt: string }[]; unread: number }>({ items: [], unread: 0 });
+  async function loadNotifications() { try { setNotifications(await api("/notifications")); } catch { /* conexão já é tratada pelo aplicativo */ } }
+  useEffect(() => { void loadNotifications(); const timer = window.setInterval(loadNotifications, 30000); return () => window.clearInterval(timer); }, [session.company.id]);
+  async function readNotification(id: string) { await api(`/notifications/${id}/read`, { method: "PATCH" }); await loadNotifications(); }
   const canAccess = (key: string) => session.user.role === "ADMIN" || Boolean(session.user.permissions?.includes(key) || (!key.includes(":") && session.user.permissions?.some((permission) => permission.startsWith(`${key}:`))));
   const sidebar = (
     <aside className="flex h-full w-[min(88vw,320px)] flex-col border-r border-slate-200 bg-white lg:w-72">
@@ -105,7 +110,13 @@ export function Layout({ session, active, onNavigate, onLogout, children }: Prop
     <div className="min-h-screen lg:flex">
       <div className="fixed inset-y-0 left-0 z-30 hidden lg:block">{sidebar}</div>
       {open && <div className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-[1px] lg:hidden" onClick={() => setOpen(false)}><div className="h-full shadow-2xl" onClick={(e) => e.stopPropagation()}>{sidebar}</div></div>}
-      <main className="min-w-0 flex-1 px-3 pb-24 pt-4 sm:px-5 md:px-6 md:pt-6 lg:ml-72 lg:p-6">{children}</main>
+      <main className="min-w-0 flex-1 px-3 pb-24 pt-4 sm:px-5 md:px-6 md:pt-6 lg:ml-72 lg:p-6">
+        <div className="relative mb-3 flex justify-end">
+          <button className="btn btn-secondary relative min-h-11" type="button" onClick={() => setNotificationsOpen(!notificationsOpen)}><Bell size={19} /><span className="hidden sm:inline">Notificações</span>{notifications.unread > 0 && <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-white">{notifications.unread}</span>}</button>
+          {notificationsOpen && <div className="absolute right-0 top-12 z-30 w-[min(92vw,380px)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl"><div className="flex items-center justify-between border-b border-slate-100 p-3"><b>Notificações</b>{notifications.unread > 0 && <button className="text-xs font-semibold text-blue-700" onClick={async () => { await api("/notifications/read-all", { method: "PATCH" }); await loadNotifications(); }}>Marcar todas como lidas</button>}</div><div className="max-h-80 overflow-y-auto">{notifications.items.map((item) => <button className={`block w-full border-b border-slate-100 p-3 text-left ${item.readAt ? "bg-white" : "bg-blue-50"}`} key={item.id} onClick={() => readNotification(item.id)}><b className="text-sm">{item.title}</b><p className="text-sm text-slate-600">{item.message}</p><span className="text-xs text-slate-400">{dateBR(item.createdAt)}</span></button>)}{!notifications.items.length && <p className="p-5 text-center text-sm text-slate-500">Nenhuma notificação.</p>}</div></div>}
+        </div>
+        {children}
+      </main>
       <nav className="mobile-app-nav fixed inset-x-0 bottom-0 z-30 flex border-t border-slate-200 bg-white/95 px-1 pb-[max(6px,env(safe-area-inset-bottom))] pt-1 shadow-[0_-4px_18px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden">
         {[items[0], items[1], items[2], items[5]].filter((item) => canAccess(item.key)).map((item) => { const Icon = item.icon; const selected = item.key === "checkout" ? active.startsWith("checkout") : active === item.key; return <button key={item.key} className={`flex min-h-14 flex-1 flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-medium ${selected ? "bg-brand-50 text-brand-700" : "text-slate-500"}`} onClick={() => onNavigate(item.key)}><Icon size={21} /><span>{item.label}</span></button>; })}
         <button className="flex min-h-14 flex-1 flex-col items-center justify-center gap-1 rounded-xl text-[11px] font-medium text-slate-500" onClick={() => setOpen(true)}><Menu size={21} /><span>Menu</span></button>

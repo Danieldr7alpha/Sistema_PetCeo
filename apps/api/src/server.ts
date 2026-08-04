@@ -15,6 +15,8 @@ import { salesRouter } from "./routes/sales.js";
 import { cashRouter } from "./routes/cash.js";
 import { financialRouter } from "./routes/financial.js";
 import { managementRouter } from "./routes/management.js";
+import { publicRegistrationRouter } from "./routes/public-registration.js";
+import { notificationsRouter } from "./routes/notifications.js";
 import { prisma } from "./lib/prisma.js";
 
 export const app = express();
@@ -49,6 +51,8 @@ app.get("/health", async (_req, res) => {
   }
 });
 app.use("/auth", authRouter);
+app.use("/public-registration", publicRegistrationRouter);
+app.use("/notifications", requireAuth, notificationsRouter);
 app.use("/dashboard", requireAuth, requirePermission("dashboard"), dashboardRouter);
 app.use("/customers", requireAuth, requirePermission("customers"), customersRouter);
 app.use("/catalog", requireAuth, requirePermission("products"), catalogRouter);
