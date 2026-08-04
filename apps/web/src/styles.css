@@ -134,6 +134,18 @@ button, input, select, textarea {
     text-align: right;
     font-weight: 600;
   }
+
+  .cash-pos-responsive .min-w-\[120px\],
+  .cash-pos-responsive .min-w-\[130px\],
+  .cash-pos-responsive .min-w-\[150px\],
+  .cash-pos-responsive .min-w-\[170px\] {
+    min-width: 0 !important;
+  }
+
+  .cash-pos-responsive label > .field {
+    padding-inline: 10px;
+    font-size: 14px;
+  }
 }
 
 @media (max-width: 767px) {
@@ -176,5 +188,13 @@ button, input, select, textarea {
 
   .mobile-app-nav button {
     -webkit-tap-highlight-color: transparent;
+  }
+
+  .cash-pos-responsive .cash-items-responsive .divide-y > div {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+  }
+
+  .cash-pos-responsive .btn {
+    min-width: 0;
   }
 }

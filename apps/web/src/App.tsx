@@ -1316,6 +1316,9 @@ function AppointmentDrawer({ appointment, loadingId, onClose, onMove, onCharge, 
             <p><b>Tutor:</b> {appointment.customer.name}</p>
             <p><b>Telefone:</b> {formatPhone(appointment.customer.phone)}</p>
             <p><b>CPF:</b> {formatCpf(appointment.customer.cpf)}</p>
+            <p><b>Endereço:</b> {[appointment.customer.street, appointment.customer.number].filter(Boolean).join(", ") || "Não cadastrado"}</p>
+            {(appointment.customer.neighborhood || appointment.customer.complement) && <p><b>Referência:</b> {[appointment.customer.neighborhood, appointment.customer.complement].filter(Boolean).join(" · ")}</p>}
+            <p><b>CEP:</b> {appointment.customer.zipCode ? formatCep(appointment.customer.zipCode) : "Não cadastrado"}</p>
           </div>
         </section>
         <section>
@@ -2112,7 +2115,7 @@ function CashPointOfSale({ cashSession, query, setQuery, waitingSales, pendingSa
       action: <button className="btn btn-primary" onClick={() => onReceive(sale)}>Receber</button>
     };
   };
-  return <div className="grid gap-4">
+  return <div className="cash-pos-responsive grid gap-4">
     <div className="panel grid gap-2 p-4 md:grid-cols-4">
       <p><b>Status:</b> <span className="text-emerald-700">Aberto</span></p>
       <p><b>Operador:</b> {session.user.name}</p>
@@ -2473,18 +2476,18 @@ function CashPointOfSaleLayout({ cashSession, query, setQuery, loadedSale, waiti
     </div>
   </div>;
 
-  return <div className="grid gap-4">
+  return <div className="cash-pos-responsive grid gap-4">
     <div className="grid w-full gap-5">
       <div className="grid gap-4">
         <div className="grid gap-4 rounded-lg border border-slate-300 bg-white p-4 text-sm lg:grid-cols-[minmax(0,3fr)_minmax(260px,1fr)]">
           <div>
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
               <label className="grid min-w-0 gap-2"><span className="font-semibold">Caixa</span><div className="field flex h-12 w-full min-w-[120px] items-center justify-center bg-white text-center text-lg">{cashSession.notes || "CX - 101"}</div></label>
               <label className="grid min-w-0 gap-2"><span className="font-semibold">Data</span><div className="field flex h-12 w-full min-w-[150px] items-center justify-center bg-white text-center text-lg">{dateBR(now.toISOString())}</div></label>
               <label className="grid min-w-0 gap-2"><span className="font-semibold">Hora</span><div className="field flex h-12 w-full min-w-[130px] items-center justify-center bg-white text-center text-lg">{now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</div></label>
               <label className="grid min-w-0 gap-2"><span className="font-semibold">Pedido</span><div className="field flex h-12 w-full min-w-[170px] items-center bg-white px-2"><input ref={orderInputRef} className="min-w-0 flex-1 bg-transparent text-center text-lg outline-none" inputMode="numeric" aria-label="Número do pedido" placeholder="000001" value={manualOrderNumber} onChange={(event) => { setManualOrderNumber(onlyDigits(event.target.value, 6)); setOrderValidation(""); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void findOrderByNumber(); } }} disabled={orderSearching} /><button className="flex h-9 w-10 shrink-0 items-center justify-center rounded-md hover:bg-slate-100 disabled:opacity-50" type="button" title="Buscar pedidos pendentes" aria-label="Buscar pedidos pendentes" disabled={orderSearching} onClick={() => { setOrderSearchPage(1); setOrderSearchOpen(true); }}><Search size={22} className="text-slate-900" /></button></div>{orderSearching && <span className="text-xs text-blue-700">Buscando pedido...</span>}{orderValidation && <span className="text-xs text-red-700">{orderValidation}</span>}</label>
             </div>
-            <div className="mt-4 grid gap-4 md:grid-cols-[minmax(0,3fr)_minmax(160px,1fr)]">
+            <div className="mt-4 grid grid-cols-[minmax(0,2fr)_minmax(90px,1fr)] gap-3 sm:gap-4 md:grid-cols-[minmax(0,3fr)_minmax(160px,1fr)]">
               <label className="grid min-w-0 gap-2"><span className="font-semibold">Usuário</span><div className="field flex h-12 w-full items-center bg-white px-6 text-lg">{session.user.name}</div></label>
               <label className="grid min-w-0 gap-2"><span className="font-semibold">Loja</span><div className="field flex h-12 w-full items-center bg-white px-6 text-lg">01</div></label>
             </div>
@@ -2508,6 +2511,10 @@ function CashPointOfSaleLayout({ cashSession, query, setQuery, loadedSale, waiti
         </div>
 
         <div className="grid gap-3">
+          <section className="panel grid gap-3 p-4 lg:hidden">
+            <div><h2 className="font-semibold">Produtos e serviços</h2><p className="text-sm text-slate-500">Pesquise pelo código ou pelo nome para adicionar ao pedido.</p></div>
+            <button className="field flex min-h-12 items-center justify-between gap-3 text-left text-slate-500" type="button" onClick={() => setItemOpen(true)}><span>Pesquisar produto ou serviço...</span><Search className="shrink-0 text-slate-900" size={22} /></button>
+          </section>
           <section className="cash-items-responsive overflow-hidden rounded-lg border border-slate-300 bg-white">
             <div className="grid grid-cols-[70px_110px_minmax(240px,1fr)_140px_160px_160px] border-b border-slate-300 bg-slate-50 px-4 py-4 text-base font-bold"><span /><span className="text-center">Código</span><span>Nome</span><span className="text-center">Quantidade</span><span className="text-center">Valor Unitário</span><span className="text-center">Valor total</span></div>
             <div className="divide-y divide-slate-200">
@@ -2526,7 +2533,7 @@ function CashPointOfSaleLayout({ cashSession, query, setQuery, loadedSale, waiti
           </section>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <button className="btn btn-primary min-h-16 justify-center gap-4 text-lg" type="button" disabled={!cart.length} onClick={() => setPaymentModalOpen(true)}><CreditCard size={28} />Pagamento</button>
           <button className="btn btn-secondary min-h-16 justify-center gap-4 text-lg" type="button" disabled={!cart.length} onClick={() => setDiscountModalOpen(true)}><Tag size={28} />Desconto</button>
           <button className="btn btn-secondary min-h-16 justify-center gap-4 border-red-200 text-lg text-red-700" type="button" onClick={cancelCurrentOrder}><XCircle size={28} />Cancelar</button>
