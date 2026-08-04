@@ -1258,17 +1258,21 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
       <div className="lg:hidden"><button className="btn btn-secondary w-full" onClick={() => setCalendarOpen(true)}>Escolher data</button></div>
     <div className="panel overflow-hidden">
       <div className="flex flex-col gap-3 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <button className={`btn ${view === "day" && selectedDate === localDateInput() ? "btn-primary" : "btn-secondary"}`} onClick={() => { const today = localDateInput(); setView("day"); setSelectedDate(today); setCalendarMonth(today); }}>Hoje</button>
-          <button className={`btn ${view === "week" ? "btn-primary" : "btn-secondary"}`} onClick={() => setView("week")}>Semana</button>
-          <button className="btn btn-secondary px-3" onClick={() => shiftPeriod(-1)}>◀</button>
-          <span className="font-medium capitalize">{periodTitle(view, selectedDate)}</span>
-          <button className="btn btn-secondary px-3" onClick={() => shiftPeriod(1)}>▶</button>
+        <div className="grid gap-3 text-sm">
+          <div className="grid grid-cols-2 gap-2 sm:flex">
+            <button className={`btn ${view === "day" && selectedDate === localDateInput() ? "btn-primary" : "btn-secondary"}`} onClick={() => { const today = localDateInput(); setView("day"); setSelectedDate(today); setCalendarMonth(today); }}>Hoje</button>
+            <button className={`btn ${view === "week" ? "btn-primary" : "btn-secondary"}`} onClick={() => setView("week")}>Semana</button>
+          </div>
+          <div className="grid grid-cols-[48px_minmax(0,1fr)_48px] items-center gap-2 sm:flex">
+            <button className="btn btn-secondary px-3" aria-label="Período anterior" onClick={() => shiftPeriod(-1)}>◀</button>
+            <span className="text-center font-medium capitalize sm:min-w-44">{periodTitle(view, selectedDate)}</span>
+            <button className="btn btn-secondary px-3" aria-label="Próximo período" onClick={() => shiftPeriod(1)}>▶</button>
+          </div>
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <label className="relative">
-            <Search className="pointer-events-none absolute left-3 top-2.5 text-slate-400" size={16} />
-            <input className="field w-full pl-9 sm:w-72" placeholder="Buscar cliente, pet, telefone, CPF ou serviço" value={search} onChange={(event) => setSearch(event.target.value)} />
+          <label className="relative block">
+            <Search className="pointer-events-none absolute left-4 top-1/2 z-10 -translate-y-1/2 text-slate-400" size={18} />
+            <input className="field w-full !pl-12 sm:w-72" placeholder="Buscar cliente, pet, telefone, CPF ou serviço" value={search} onChange={(event) => setSearch(event.target.value)} />
           </label>
           <span className="text-sm font-semibold text-slate-700">🐶 {periodAppointments.length} Atendimentos</span>
         </div>
