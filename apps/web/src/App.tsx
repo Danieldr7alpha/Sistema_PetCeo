@@ -1433,11 +1433,15 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
   const [renewalConfirmed, setRenewalConfirmed] = useState(false);
   const [additionalServiceIds, setAdditionalServiceIds] = useState<string[]>([]);
   const [serviceSelectionError, setServiceSelectionError] = useState("");
-  const [otherPetServices, setOtherPetServices] = useState<Record<string, string>>({});
+  const [addedPetIds, setAddedPetIds] = useState<string[]>([]);
+  const [otherPetServiceIds, setOtherPetServiceIds] = useState<Record<string, string[]>>({});
+  const [otherPetMembershipOptions, setOtherPetMembershipOptions] = useState<Record<string, Membership[]>>({});
+  const [otherPetMembershipIds, setOtherPetMembershipIds] = useState<Record<string, string>>({});
   const activePets = selectedCustomer?.pets.filter((pet) => pet.status === "ACTIVE") ?? [];
   const petId = form.petId || activePets[0]?.id;
   const additionalServices = additionalServiceIds.map((id) => services.find((service) => service.id === id)).filter((service): service is Service => Boolean(service));
   const additionalTotal = additionalServices.reduce((sum, service) => sum + Number(service.price), 0);
+  const otherPetsTotal = addedPetIds.reduce((sum, addedPetId) => sum + (otherPetServiceIds[addedPetId] ?? []).reduce((petSum, serviceId) => petSum + Number(services.find((service) => service.id === serviceId)?.price ?? 0), 0), 0);
   useEffect(() => {
     const query = customerQuery.trim();
     if (selectedCustomer || query.length < 2) {
@@ -1500,7 +1504,10 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
     setRenewalConfirmed(false);
     setAdditionalServiceIds([]);
     setServiceSelectionError("");
-    setOtherPetServices({});
+    setAddedPetIds([]);
+    setOtherPetServiceIds({});
+    setOtherPetMembershipOptions({});
+    setOtherPetMembershipIds({});
   }
   function addAdditionalService(serviceId: string) {
     setServiceSelectionError("");
@@ -1514,6 +1521,29 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
       return;
     }
     setAdditionalServiceIds((current) => [...current, serviceId]);
+  }
+  function addServiceForPet(addedPetId: string, serviceId: string) {
+    if (!serviceId) return;
+    setOtherPetServiceIds((current) => {
+      const selected = current[addedPetId] ?? [];
+      if (selected.includes(serviceId)) return current;
+      return { ...current, [addedPetId]: [...selected, serviceId] };
+    });
+  }
+  function addNextPet() {
+    const nextPet = activePets.find((pet) => pet.id !== petId && !addedPetIds.includes(pet.id));
+    if (!nextPet) return;
+    setAddedPetIds((current) => [...current, nextPet.id]);
+    setOtherPetServiceIds((current) => ({ ...current, [nextPet.id]: [] }));
+    api<Membership[]>(`/memberships/pet/${nextPet.id}/options`)
+      .then((options) => setOtherPetMembershipOptions((current) => ({ ...current, [nextPet.id]: options })))
+      .catch(() => setOtherPetMembershipOptions((current) => ({ ...current, [nextPet.id]: [] })));
+  }
+  function removeAddedPet(addedPetId: string) {
+    setAddedPetIds((current) => current.filter((id) => id !== addedPetId));
+    setOtherPetServiceIds((current) => { const next = { ...current }; delete next[addedPetId]; return next; });
+    setOtherPetMembershipOptions((current) => { const next = { ...current }; delete next[addedPetId]; return next; });
+    setOtherPetMembershipIds((current) => { const next = { ...current }; delete next[addedPetId]; return next; });
   }
   function selectPackage(membership: Membership, mode: "PACKAGE" | "RENEWAL_AT_CHECKOUT") {
     const coveredServiceId = membership.plan.service.id;
@@ -1554,7 +1584,7 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
     try {
       setSaving(true);
       const selectedMembership = membershipOptions.find((membership) => membership.id === selectedMembershipId);
-      const orderGroupId = Object.keys(otherPetServices).length ? crypto.randomUUID() : undefined;
+      const orderGroupId = addedPetIds.length ? crypto.randomUUID() : undefined;
       const common = { date: form.date, startTime: form.startTime, endTime: undefined, notes: form.notes, customerId: selectedCustomer.id, orderGroupId };
       await api("/appointments", { method: "POST", body: JSON.stringify({
         ...form,
@@ -1567,10 +1597,16 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
         additionalServiceIds: persistedAdditionalServiceIds,
         orderGroupId
       }) });
-      for (const [otherPetId, otherServiceId] of Object.entries(otherPetServices)) {
+      for (const otherPetId of addedPetIds) {
+        const petServiceIds = otherPetServiceIds[otherPetId] ?? [];
+        const petMembershipId = otherPetMembershipIds[otherPetId];
+        const petMembership = (otherPetMembershipOptions[otherPetId] ?? []).find((membership) => membership.id === petMembershipId);
+        const usesPackage = Boolean(petMembershipId && petMembership);
         await api("/appointments", { method: "POST", body: JSON.stringify({
-          ...common, petId: otherPetId, serviceId: otherServiceId,
-          paymentMode: "AVULSO", additionalServiceIds: []
+          ...common, petId: otherPetId, serviceId: usesPackage ? petMembership!.plan.service.id : petServiceIds[0],
+          paymentMode: usesPackage ? "PACKAGE" : "AVULSO",
+          membershipId: usesPackage ? petMembershipId : undefined,
+          additionalServiceIds: usesPackage ? petServiceIds.filter((id) => id !== petMembership!.plan.service.id) : petServiceIds.slice(1)
         }) });
       }
       onSaved();
@@ -1600,17 +1636,8 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
     {selectedCustomer && <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900"><b>{customerCode(selectedCustomer)} — {selectedCustomer.name}</b><p>{formatPhone(selectedCustomer.phone)} · {formatCpf(selectedCustomer.cpf)}</p></div>}
     {selectedCustomer && activePets.length === 0 && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Este cliente ainda não possui pet cadastrado.</p>}
     {selectedCustomer && activePets.length === 1 && <div className="rounded-lg bg-slate-50 p-3 text-sm"><b>Pet:</b> {activePets[0].name}</div>}
-    {selectedCustomer && activePets.length > 1 && <label className="text-sm font-medium text-slate-700">Pet<select className="field mt-1" value={form.petId} onChange={(e) => { setForm({ ...form, petId: e.target.value }); setOtherPetServices({}); }}>{activePets.map((pet) => <option key={pet.id} value={pet.id}>{pet.name}</option>)}</select></label>}
-    {selectedCustomer && activePets.length > 1 && <section className="grid gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">
-      <div><b>Agendar mais pets no mesmo pedido</b><p className="text-blue-800">Cada pet terá seu atendimento e valor, mas a cobrança será feita junta em um único comprovante.</p></div>
-      {activePets.filter((pet) => pet.id !== petId).map((pet) => {
-        const selectedService = otherPetServices[pet.id];
-        return <div className="grid gap-2 rounded-md border border-blue-200 bg-white p-3 sm:grid-cols-[auto_1fr] sm:items-center" key={pet.id}>
-          <label className="flex items-center gap-2 font-semibold"><input type="checkbox" checked={selectedService !== undefined} onChange={(event) => setOtherPetServices((current) => { const next = { ...current }; if (event.target.checked) next[pet.id] = services[0]?.id ?? ""; else delete next[pet.id]; return next; })} />{pet.name}</label>
-          {selectedService !== undefined && <select className="field" required value={selectedService} onChange={(event) => setOtherPetServices((current) => ({ ...current, [pet.id]: event.target.value }))}><option value="">Selecione o serviço</option>{services.map((service) => <option key={service.id} value={service.id}>{service.name} — {currency(service.price)}</option>)}</select>}
-        </div>;
-      })}
-    </section>}
+    {selectedCustomer && activePets.length > 1 && <label className="text-sm font-medium text-slate-700">Pet principal<select className="field mt-1" value={form.petId} onChange={(e) => { setForm({ ...form, petId: e.target.value }); setAddedPetIds([]); setOtherPetServiceIds({}); setOtherPetMembershipOptions({}); setOtherPetMembershipIds({}); }}>{activePets.map((pet) => <option key={pet.id} value={pet.id}>{pet.name}</option>)}</select></label>}
+    {selectedCustomer && activePets.length > 1 && addedPetIds.length < activePets.length - 1 && <button className="btn btn-secondary justify-self-start" type="button" onClick={addNextPet}>+ Pet</button>}
     {membershipsLoading && <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">Consultando mensalidades deste pet...</p>}
     {membershipsError && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{membershipsError}</p>}
     {!membershipsLoading && membershipOptions.length > 0 && <section className="grid gap-2">
@@ -1643,7 +1670,7 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
       })}
     </section>}
     <section className="grid gap-2">
-      <h3 className="text-sm font-semibold text-slate-700">Serviços avulsos adicionais</h3>
+      <h3 className="text-sm font-semibold text-slate-700">Serviços avulsos adicionais — {activePets.find((pet) => pet.id === petId)?.name ?? "pet principal"}</h3>
       <select className="field w-full" value="" onChange={(event) => addAdditionalService(event.target.value)}>
         <option value="">Adicionar serviço avulso...</option>
         {services.map((service) => <option key={service.id} value={service.id}>{service.name} — {currency(service.price)}</option>)}
@@ -1651,19 +1678,46 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
       {serviceSelectionError && <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">{serviceSelectionError}</p>}
       {!!additionalServices.length && <div className="grid gap-2">{additionalServices.map((service) => <div className="flex flex-col gap-3 rounded-lg border border-slate-200 p-3 text-sm sm:flex-row sm:items-center sm:justify-between" key={service.id}><div><b>{service.name}</b><p className="text-slate-600">{servicePetSizeLabel(service.petSize)} · {serviceCoatLabel(service.coat)}</p><p className="font-semibold text-blue-800">{currency(service.price)}</p></div><button className="btn btn-secondary min-h-11 justify-center text-red-700" type="button" onClick={() => { setAdditionalServiceIds((current) => current.filter((id) => id !== service.id)); setServiceSelectionError(""); }}>Remover</button></div>)}</div>}
     </section>
+    {addedPetIds.map((addedPetId) => {
+      const addedPet = activePets.find((pet) => pet.id === addedPetId);
+      const selectedIds = otherPetServiceIds[addedPetId] ?? [];
+      const selectedServices = selectedIds.map((id) => services.find((service) => service.id === id)).filter((service): service is Service => Boolean(service));
+      const petMemberships = (otherPetMembershipOptions[addedPetId] ?? []).filter((membership) => membership.usable);
+      const selectedPetMembershipId = otherPetMembershipIds[addedPetId] ?? "";
+      const selectedPetMembership = petMemberships.find((membership) => membership.id === selectedPetMembershipId);
+      return <section className="grid gap-2 rounded-lg border border-blue-200 bg-blue-50 p-4" key={addedPetId}>
+        <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold text-blue-950">Pet: {addedPet?.name}</h3><p className="text-sm text-blue-800">Os serviços deste pet entram no mesmo pedido.</p></div><button className="btn btn-secondary text-red-700" type="button" onClick={() => removeAddedPet(addedPetId)}>Remover pet</button></div>
+        {!!petMemberships.length && <div className="grid gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm">
+          <h4 className="font-semibold text-emerald-900">Pacote mensalista — {addedPet?.name}</h4>
+          <select className="field" value={selectedPetMembershipId} onChange={(event) => { const membershipId = event.target.value; const coveredServiceId = petMemberships.find((membership) => membership.id === membershipId)?.plan.service.id; setOtherPetMembershipIds((current) => ({ ...current, [addedPetId]: membershipId })); if (coveredServiceId) setOtherPetServiceIds((current) => ({ ...current, [addedPetId]: (current[addedPetId] ?? []).filter((id) => id !== coveredServiceId) })); }}>
+            <option value="">Não usar pacote</option>
+            {petMemberships.map((membership) => <option key={membership.id} value={membership.id}>{membership.plan.name} — {membership.plan.service.name} ({membership.availableUses ?? membership.remainingUses} usos disponíveis)</option>)}
+          </select>
+          {selectedPetMembership && <p className="font-medium text-emerald-800">O serviço {selectedPetMembership.plan.service.name} será coberto pelo pacote deste pet.</p>}
+        </div>}
+        <h4 className="text-sm font-semibold text-slate-700">Serviços avulsos adicionais — {addedPet?.name}</h4>
+        <select className="field w-full" value="" onChange={(event) => addServiceForPet(addedPetId, event.target.value)}>
+          <option value="">Adicionar serviço avulso...</option>
+          {services.filter((service) => !selectedIds.includes(service.id) && service.id !== selectedPetMembership?.plan.service.id).map((service) => <option key={service.id} value={service.id}>{service.name} — {currency(service.price)}</option>)}
+        </select>
+        {!!selectedServices.length && <div className="grid gap-2">{selectedServices.map((service) => <div className="flex flex-col gap-3 rounded-lg border border-blue-100 bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between" key={service.id}><div><b>{service.name}</b><p className="text-slate-600">{servicePetSizeLabel(service.petSize)} · {serviceCoatLabel(service.coat)}</p><p className="font-semibold text-blue-800">{currency(service.price)}</p></div><button className="btn btn-secondary min-h-11 justify-center text-red-700" type="button" onClick={() => setOtherPetServiceIds((current) => ({ ...current, [addedPetId]: selectedIds.filter((id) => id !== service.id) }))}>Remover</button></div>)}</div>}
+        {!selectedServices.length && !selectedPetMembership && <p className="text-sm text-amber-800">Escolha um pacote ou adicione ao menos um serviço para este pet.</p>}
+      </section>;
+    })}
     <label className="text-sm font-medium text-slate-700">Data do atendimento<input className="field mt-1" type="date" min={localDateInput()} value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
     <label className="text-sm font-medium text-slate-700">Horário de início<input className="field mt-1" type="time" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} /></label>
     <label className="text-sm font-medium text-slate-700">Observações<textarea className="field mt-1" placeholder="Ex.: alergias, cuidados especiais ou combinado com o tutor" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
     <section className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
       <h3 className="font-semibold">Resumo</h3>
       {paymentMode !== "AVULSO" && <div><p><b>Serviço do pacote:</b> {services.find((service) => service.id === form.serviceId)?.name ?? "-"}</p><p className="text-emerald-800">Coberto pelo pacote</p></div>}
-      <div><p><b>Serviços avulsos:</b></p>{additionalServices.length ? additionalServices.map((service) => <p key={service.id}>{service.name} — {currency(service.price)}</p>) : <p className="text-slate-500">Nenhum serviço avulso adicionado.</p>}</div>
-      <p className="text-base"><b>Total avulso previsto:</b> {currency(additionalTotal)}</p>
+      <div><p><b>{activePets.find((pet) => pet.id === petId)?.name ?? "Pet principal"}:</b></p>{additionalServices.length ? additionalServices.map((service) => <p key={service.id}>{service.name} — {currency(service.price)}</p>) : <p className="text-slate-500">Nenhum serviço avulso adicionado.</p>}</div>
+      {addedPetIds.map((addedPetId) => { const membership = (otherPetMembershipOptions[addedPetId] ?? []).find((item) => item.id === otherPetMembershipIds[addedPetId]); return <div key={addedPetId}><p><b>{activePets.find((pet) => pet.id === addedPetId)?.name}:</b></p>{membership && <p className="text-emerald-800">{membership.plan.service.name} — coberto pelo pacote {membership.plan.name}</p>}{(otherPetServiceIds[addedPetId] ?? []).map((serviceId) => { const service = services.find((item) => item.id === serviceId); return service ? <p key={serviceId}>{service.name} — {currency(service.price)}</p> : null; })}</div>; })}
+      <p className="text-base"><b>Total do pedido previsto:</b> {currency(additionalTotal + otherPetsTotal)}</p>
       {paymentMode === "PACKAGE" && <p><b>Uso do pacote:</b> 1 utilização será reservada.</p>}
     </section>
     {paymentMode === "PACKAGE" && selectedMembershipId && <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">Uso do pacote será reservado agora e consumido somente ao finalizar o atendimento.</p>}
     {paymentMode === "RENEWAL_AT_CHECKOUT" && selectedMembershipId && <div className="grid gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><p className="font-medium">Este atendimento será realizado com renovação pendente. A renovação será adicionada ao pedido no Caixa após a conclusão do atendimento.</p><label className="flex items-start gap-2"><input className="mt-1" type="checkbox" checked={renewalConfirmed} onChange={(event) => setRenewalConfirmed(event.target.checked)} /><span>Confirmo que o valor do pacote deverá ser cobrado no Caixa ao finalizar.</span></label></div>}
-    {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}<button className="btn btn-primary justify-self-end disabled:opacity-60" disabled={saving || !selectedCustomer || !petId || Object.values(otherPetServices).some((id) => !id) || (paymentMode === "AVULSO" ? !additionalServiceIds.length : !form.serviceId || !selectedMembershipId) || (paymentMode === "RENEWAL_AT_CHECKOUT" && !renewalConfirmed) || isPastDate(form.date)}>{saving ? "Salvando..." : "Salvar agendamento"}</button>
+    {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}<button className="btn btn-primary justify-self-end disabled:opacity-60" disabled={saving || !selectedCustomer || !petId || addedPetIds.some((id) => !(otherPetServiceIds[id]?.length) && !otherPetMembershipIds[id]) || (paymentMode === "AVULSO" ? !additionalServiceIds.length : !form.serviceId || !selectedMembershipId) || (paymentMode === "RENEWAL_AT_CHECKOUT" && !renewalConfirmed) || isPastDate(form.date)}>{saving ? "Salvando..." : "Salvar agendamento"}</button>
   </form></Modal>;
 }
 

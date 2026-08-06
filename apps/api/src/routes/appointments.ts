@@ -348,6 +348,13 @@ appointmentsRouter.patch("/:id/status", async (req, res) => {
     res.json(fresh ?? result.appointment);
   } catch (error) {
     const known = error as Error & { statusCode?: number; code?: string };
+    console.error("APPOINTMENT_STATUS_UPDATE_FAILED", {
+      appointmentId: req.params.id,
+      companyId: cid,
+      requestedStatus: body.status,
+      code: known.code,
+      message: known.message
+    });
     res.status(known.statusCode ?? (known.code === "P2034" ? 409 : 500)).json({
       code: known.code === "P2034" ? "MEMBERSHIP_CONFLICT" : known.code,
       message: known.code === "P2034" ? "O saldo do pacote mudou. Tente novamente." : known.message

@@ -459,9 +459,13 @@ export async function ensureWaitingSaleForFinishedAppointment(cid: string, appoi
     const total = items.reduce((sum, item) => sum + Number(item.total), 0);
     if (total <= 0) return null;
     const primary = groupedAppointments[0];
+    // Generate the code before opening the transaction. nextSaleCode uses the
+    // shared Prisma client and would otherwise wait for the only pool
+    // connection held by this transaction until it expires.
+    const internalCode = await nextSaleCode(cid);
     const sale = await prisma.$transaction(async (tx) => {
       const created = await tx.sale.create({ data: {
-        companyId: cid, internalCode: await nextSaleCode(cid), customerId: appointment.customerId,
+        companyId: cid, internalCode, customerId: appointment.customerId,
         petId: primary.petId, appointmentId: primary.id, origin: "AGENDA", status: "WAITING_PAYMENT",
         paymentStatus: "PENDING", pendingSince: new Date(), subtotal: total, total, pendingAmount: total,
         items: { create: items }
