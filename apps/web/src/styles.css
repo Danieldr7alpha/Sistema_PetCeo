@@ -42,7 +42,7 @@ button, input, select, textarea {
 }
 
 .field {
-  @apply w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-50;
+  @apply w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-brand-600 focus:ring-2 focus:ring-blue-100;
 }
 
 .btn {
@@ -54,11 +54,11 @@ button, input, select, textarea {
 }
 
 .btn-secondary {
-  @apply border border-slate-200 bg-white text-slate-700 hover:bg-slate-50;
+  @apply border border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-100;
 }
 
 .panel {
-  @apply min-w-0 rounded-lg border border-slate-200 bg-white;
+  @apply min-w-0 rounded-lg border border-slate-300 bg-white shadow-sm;
 }
 
 .badge {
@@ -67,6 +67,33 @@ button, input, select, textarea {
 
 .agenda-expanded .week-calendar-grid {
   max-height: calc(100dvh - 57px) !important;
+}
+
+.agenda-responsive .week-calendar-grid {
+  background: #fff;
+}
+
+.agenda-responsive .week-calendar-header,
+.agenda-responsive .week-calendar-header > div {
+  border-color: #cbd5e1 !important;
+  background: #e8eef7 !important;
+  color: #0f172a;
+}
+
+.agenda-responsive .week-calendar-row:not(.week-calendar-header) {
+  border-color: #cbd5e1 !important;
+}
+
+.agenda-responsive .week-calendar-row:not(.week-calendar-header) > div {
+  border-color: #cbd5e1 !important;
+}
+
+.agenda-responsive .week-calendar-row:not(.week-calendar-header) > div:hover {
+  background: #eff6ff;
+}
+
+.agenda-responsive .week-calendar-row:not(.week-calendar-header) > .bg-blue-50\/50 {
+  background: #dbeafe !important;
 }
 
 @media (max-width: 1023px) {
