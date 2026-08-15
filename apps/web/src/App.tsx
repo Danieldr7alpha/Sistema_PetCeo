@@ -1394,7 +1394,7 @@ function AppointmentDrawer({ appointment, loadingId, onClose, onMove, onCharge, 
   const chargeableTotal = Number(order?.pendingAmount ?? order?.total ?? 0);
   const canCharge = appointment.status === "FINISHED" && !!order && chargeableTotal > 0 && order.status !== "PAID" && order.status !== "CANCELLED";
   const noChargeRequired = appointment.status === "FINISHED" && coveredByPackage && chargeableTotal <= 0;
-  return <div className="fixed inset-0 z-40 bg-slate-950/30" onClick={onClose}>
+  return <div className="fixed inset-0 z-[100] bg-slate-950/30" onClick={onClose}>
     <aside className="ml-auto flex h-full w-full max-w-md flex-col bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
       <div className="flex items-center justify-between border-b border-slate-200 p-5">
         <div>
