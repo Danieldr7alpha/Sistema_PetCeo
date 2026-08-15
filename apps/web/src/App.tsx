@@ -4460,7 +4460,8 @@ export function App() {
   }, []);
   async function retryConnection() {
     setRetryingConnection(true);
-    await monitorConnection(connectionState === "OFFLINE");
+    const failure = await monitorConnection(connectionState === "OFFLINE");
+    if (!failure) window.dispatchEvent(new Event("ceo-pet-retry"));
     setRetryingConnection(false);
   }
   const screen = useMemo(() => {
