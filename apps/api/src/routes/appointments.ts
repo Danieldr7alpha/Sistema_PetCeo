@@ -319,6 +319,25 @@ appointmentsRouter.patch("/:id/status", async (req, res) => {
           ...(coveredPackageWithoutCharge ? { paymentStatus: "NOT_REQUIRED" as const } : {})
         }
       });
+      if (body.status === "CANCELLED") {
+        const existingCancellation = await tx.customerHistory.findFirst({
+          where: { companyId: cid, appointmentId: current.id, type: "APPOINTMENT_CANCELLED" }
+        });
+        if (!existingCancellation) {
+          await tx.customerHistory.create({
+            data: {
+              companyId: cid,
+              customerId: current.customerId,
+              petId: current.petId,
+              appointmentId: current.id,
+              membershipId: current.membershipId,
+              type: "APPOINTMENT_CANCELLED",
+              title: "Agendamento cancelado",
+              description: `${current.pet.name} · ${current.service.name} · ${current.date.toLocaleDateString("pt-BR", { timeZone: "UTC" })} às ${current.startTime}`
+            }
+          });
+        }
+      }
       const appointment = await tx.appointment.findUniqueOrThrow({ where: { id: current.id }, include: appointmentInclude });
       return { appointment, consumedNow };
     }, { maxWait: 10000, timeout: 20000 });
@@ -358,13 +377,30 @@ appointmentsRouter.patch("/:id/status", async (req, res) => {
 appointmentsRouter.delete("/:id", requireAdmin, async (req, res) => {
   const cid = companyId(req);
   await prisma.$transaction(async (tx) => {
-    const appointment = await tx.appointment.findFirst({ where: { id: req.params.id, companyId: cid }, include: { membershipUsage: true } });
+    const appointment = await tx.appointment.findFirst({ where: { id: req.params.id, companyId: cid }, include: { membershipUsage: true, pet: true, service: true } });
     if (!appointment) return;
     if (appointment.membershipId) await lockMembership(tx, appointment.membershipId);
     if (appointment.membershipUsage?.status === "RESERVED") {
       await tx.membershipUsage.update({ where: { id: appointment.membershipUsage.id }, data: { status: "RELEASED", releasedAt: new Date(), operatorId: req.user?.userId } });
     }
     await tx.appointment.update({ where: { id: appointment.id }, data: { status: "CANCELLED" } });
+    const existingCancellation = await tx.customerHistory.findFirst({
+      where: { companyId: cid, appointmentId: appointment.id, type: "APPOINTMENT_CANCELLED" }
+    });
+    if (!existingCancellation) {
+      await tx.customerHistory.create({
+        data: {
+          companyId: cid,
+          customerId: appointment.customerId,
+          petId: appointment.petId,
+          appointmentId: appointment.id,
+          membershipId: appointment.membershipId,
+          type: "APPOINTMENT_CANCELLED",
+          title: "Agendamento cancelado",
+          description: `${appointment.pet.name} · ${appointment.service.name} · ${appointment.date.toLocaleDateString("pt-BR", { timeZone: "UTC" })} às ${appointment.startTime}`
+        }
+      });
+    }
   });
   res.status(204).send();
 });
