@@ -40,6 +40,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   const method = String(options.method ?? "GET").toUpperCase();
   const requiresLiveState = path === "/cash/current";
   let response: Response;
+  window.dispatchEvent(new Event("ceo-pet-request-start"));
   try {
     response = await fetch(`${API_URL}${path}`, {
       ...options,
@@ -70,6 +71,8 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
       throw new ApiError("Esta alteração ainda exige conexão. Nenhum dado foi perdido ou enviado parcialmente.", 0, "OFFLINE_WRITE_NOT_ENABLED");
     }
     throw new ApiError(`Não foi possível conectar à API em ${API_URL}.`, 0, "API_UNREACHABLE");
+  } finally {
+    window.dispatchEvent(new Event("ceo-pet-request-end"));
   }
 
   if (!response.ok) {

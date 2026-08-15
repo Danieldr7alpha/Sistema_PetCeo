@@ -1169,6 +1169,8 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
   const [draggedAppointmentId, setDraggedAppointmentId] = useState("");
   const [dragOverSlot, setDragOverSlot] = useState("");
   const [dragError, setDragError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [hiddenAppointmentIds, setHiddenAppointmentIds] = useState<string[]>([]);
   const [calendarExpanded, setCalendarExpanded] = useState(false);
   useEffect(() => {
     if (!calendarExpanded) return;
@@ -1183,10 +1185,18 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
   }, [calendarExpanded]);
   async function move(id: string, status: string) {
     setLoadingId(id);
+    setActionError("");
     try {
       const updated = await api<Appointment>(`/appointments/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) });
-      setSelectedAppointment((current) => current?.id === id ? { ...current, ...updated } : current);
+      if (status === "CANCELLED") {
+        setHiddenAppointmentIds((current) => current.includes(id) ? current : [...current, id]);
+        setSelectedAppointment(null);
+      } else {
+        setSelectedAppointment((current) => current?.id === id ? { ...current, ...updated } : current);
+      }
       refresh();
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "Não foi possível atualizar o agendamento.");
     }
     finally { setLoadingId(""); }
   }
@@ -1215,7 +1225,7 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
     }
   }
   const query = search.trim().toLowerCase();
-  const allAppointments = (data ?? []).filter((appointment) => appointment.status !== "CANCELLED");
+  const allAppointments = (data ?? []).filter((appointment) => appointment.status !== "CANCELLED" && !hiddenAppointmentIds.includes(appointment.id));
   const matchesSearch = (appointment: Appointment) => {
     if (!query) return true;
     const digits = onlyDigits(query);
@@ -1366,6 +1376,7 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
         </div>
       </div>}
       {view === "week" && !calendarExpanded && <div className="flex gap-3 overflow-x-auto border-b border-slate-300 bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-700"><span className="flex shrink-0 items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-blue-600" />Agendado</span><span className="flex shrink-0 items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-orange-500" />Chegou</span><span className="flex shrink-0 items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-violet-600" />Em atendimento</span><span className="flex shrink-0 items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-emerald-600" />Finalizado</span><span className="flex shrink-0 items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-fuchsia-600" />Renovação</span></div>}
+      {actionError && <p className="m-3 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">{actionError}</p>}
       {dragError && <p className="m-3 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">{dragError}</p>}
       {view === "day" && <><div className="hidden max-h-[70vh] overflow-y-auto md:block">{timeSlots.map((time) => { const slot = `${selectedDate}-${time}`; return <div className="grid min-h-20 grid-cols-[72px_1fr] border-b border-slate-300" key={time}><button className="border-r border-slate-300 bg-slate-50 p-3 text-left text-sm font-bold text-slate-800 hover:bg-slate-200" onClick={() => openAt(time)}>{time}</button><div {...dropZoneProps(selectedDate, time)} className={`grid grid-cols-1 gap-2 bg-white p-3 transition-colors hover:bg-blue-50 xl:grid-cols-2 2xl:grid-cols-3 ${dragOverSlot === slot ? "bg-blue-100 ring-2 ring-inset ring-blue-600" : ""}`} onClick={(event) => { if (event.currentTarget === event.target) openAt(time); }}>{dayAppointments(selectedDate).filter((appointment) => appointment.startTime.slice(0, 5) === time).map((appointment) => appointmentCard(appointment))}</div></div>; })}</div><div className="grid gap-3 p-3 md:hidden">{dayAppointments(selectedDate).map((appointment) => appointmentCard(appointment, true))}{!dayAppointments(selectedDate).length && <p className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-sm text-slate-600">Nenhum atendimento encontrado para este dia.</p>}</div></>}
       {view === "week" && <><div className="week-calendar-grid hidden max-h-[70vh] overflow-auto md:block"><div className="week-calendar-header week-calendar-row sticky top-0 z-20 grid grid-cols-[56px_repeat(7,minmax(108px,1fr))] border-b border-slate-200 bg-slate-50 shadow-sm">{["", ...weekDays(selectedDate)].map((day, index) => <div className={`${index === 0 ? "sticky left-0 z-30" : ""} bg-slate-50 p-2 text-center text-xs font-semibold capitalize`} key={index}>{day && parseLocalDate(day).toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit" })}</div>)}</div>{timeSlots.map((time) => <div className="week-calendar-row grid grid-cols-[56px_repeat(7,minmax(108px,1fr))] border-b border-slate-100" key={time}><div className="sticky left-0 z-[5] border-r border-slate-100 bg-white p-2 text-xs font-semibold text-slate-700">{time}</div>{weekDays(selectedDate).map((day) => { const slot = `${day}-${time}`; return <div {...dropZoneProps(day, time)} className={`min-h-20 border-r border-slate-100 p-1.5 text-left hover:bg-slate-50 ${day === localDateInput() ? "bg-blue-50/50" : ""} ${dragOverSlot === slot ? "bg-blue-100 ring-2 ring-inset ring-blue-400" : ""}`} key={`${day}-${time}`} onClick={(event) => { if (event.currentTarget === event.target) openAt(time, day); }}>{dayAppointments(day).filter((appointment) => appointment.startTime.slice(0, 5) === time).map((appointment) => appointmentCard(appointment, true))}</div>; })}</div>)}</div><div className="week-mobile-list grid gap-3 p-3 md:hidden">{weekDays(selectedDate).map((day) => <section className="grid gap-2" key={day}><h3 className="font-semibold capitalize">{parseLocalDate(day).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" })}</h3>{dayAppointments(day).map((appointment) => appointmentCard(appointment, true))}<button className="btn btn-secondary justify-self-start" onClick={() => openAt("09:00", day)}>Novo neste dia</button></section>)}</div></>}
@@ -4320,6 +4331,28 @@ function PublicCustomerRegistration({ token }: { token: string }) {
   return <main className="min-h-screen bg-slate-100 px-3 py-5 sm:px-6 sm:py-8"><form className="panel mx-auto grid max-w-3xl gap-6 overflow-hidden p-4 sm:p-7" onSubmit={submit}><header><p className="text-sm font-semibold text-blue-700">{data?.companyName ?? "Carregando empresa..."}</p><h1 className="mt-1 text-2xl font-semibold">Cadastro de cliente e pet</h1><p className="mt-2 text-sm text-slate-600">Preencha seus dados para agilizar o atendimento. Campos com * são obrigatórios.</p></header><section className="grid gap-3 sm:grid-cols-2"><h2 className="sm:col-span-2 font-semibold">Seus dados</h2><label className="text-sm font-medium">Nome completo *<input className="field mt-1" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label><label className="text-sm font-medium">CPF *<input className="field mt-1" required inputMode="numeric" value={formatCpf(form.cpf)} onChange={(e) => setForm({ ...form, cpf: onlyDigits(e.target.value, 11) })} /></label><label className="text-sm font-medium sm:col-span-2">Celular / WhatsApp *<input className="field mt-1" required inputMode="tel" value={formatPhone(form.phone)} onChange={(e) => setForm({ ...form, phone: onlyDigits(e.target.value, 11) })} /></label></section><section className="grid gap-3 sm:grid-cols-2"><h2 className="sm:col-span-2 font-semibold">Endereço</h2><label className="text-sm font-medium">CEP<input className="field mt-1" inputMode="numeric" value={formatCep(form.zipCode)} onBlur={lookupCep} onChange={(e) => setForm({ ...form, zipCode: onlyDigits(e.target.value, 8) })} /></label><label className="text-sm font-medium">Rua<input className="field mt-1" value={form.street} onChange={(e) => setForm({ ...form, street: e.target.value })} /></label><label className="text-sm font-medium">Número<input className="field mt-1" value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} /></label><label className="text-sm font-medium">Complemento<input className="field mt-1" value={form.complement} onChange={(e) => setForm({ ...form, complement: e.target.value })} /></label><label className="text-sm font-medium">Bairro<input className="field mt-1" value={form.neighborhood} onChange={(e) => setForm({ ...form, neighborhood: e.target.value })} /></label><label className="text-sm font-medium">Cidade<input className="field mt-1" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /></label><label className="text-sm font-medium">Estado<input className="field mt-1" value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} /></label>{lookingUpCep && <p className="self-end text-sm text-blue-700">Consultando CEP...</p>}</section><section className="grid gap-3 sm:grid-cols-2"><h2 className="sm:col-span-2 font-semibold">Dados do pet</h2><label className="text-sm font-medium">Nome do pet *<input className="field mt-1" required value={form.petName} onChange={(e) => setForm({ ...form, petName: e.target.value })} /></label><label className="text-sm font-medium">Espécie *<select className="field mt-1" value={form.species} onChange={(e) => setForm({ ...form, species: e.target.value })}><option value="DOG">Cão</option><option value="CAT">Gato</option><option value="OTHER">Outro</option></select></label>{form.species === "OTHER" && <label className="text-sm font-medium">Qual espécie? *<input className="field mt-1" required value={form.customSpecies} onChange={(e) => setForm({ ...form, customSpecies: e.target.value })} /></label>}<label className="text-sm font-medium">Raça<input className="field mt-1" value={form.breed} onChange={(e) => setForm({ ...form, breed: e.target.value })} /></label><label className="text-sm font-medium">Sexo<select className="field mt-1" value={form.petGender} onChange={(e) => setForm({ ...form, petGender: e.target.value })}><option value="UNINFORMED">Não informado</option><option value="MALE">Macho</option><option value="FEMALE">Fêmea</option></select></label><label className="text-sm font-medium">Porte<select className="field mt-1" value={form.size} onChange={(e) => setForm({ ...form, size: e.target.value })}><option value="SMALL">Pequeno</option><option value="MEDIUM">Médio</option><option value="LARGE">Grande</option><option value="GIANT">Gigante</option></select></label><label className="text-sm font-medium">Cor<input className="field mt-1" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} /></label><label className="text-sm font-medium sm:col-span-2">Observações importantes<textarea className="field mt-1" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label></section>{error && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}<button className="btn btn-primary w-full sm:justify-self-end sm:w-auto" disabled={saving || !data}>{saving ? "Enviando..." : "Concluir cadastro"}</button></form></main>;
 }
 
+function GlobalLoadingIndicator() {
+  const [requests, setRequests] = useState(0);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const started = () => setRequests((current) => current + 1);
+    const ended = () => setRequests((current) => Math.max(0, current - 1));
+    window.addEventListener("ceo-pet-request-start", started);
+    window.addEventListener("ceo-pet-request-end", ended);
+    return () => {
+      window.removeEventListener("ceo-pet-request-start", started);
+      window.removeEventListener("ceo-pet-request-end", ended);
+    };
+  }, []);
+  useEffect(() => {
+    if (requests === 0) { setVisible(false); return; }
+    const timer = window.setTimeout(() => setVisible(true), 180);
+    return () => window.clearTimeout(timer);
+  }, [requests]);
+  if (!visible) return null;
+  return <div className="fixed inset-0 z-[200] grid place-items-center bg-slate-950/25 backdrop-blur-[1px]" role="status" aria-live="polite"><div className="grid min-w-40 place-items-center gap-3 rounded-2xl border border-slate-300 bg-white px-6 py-5 shadow-2xl"><span className="h-10 w-10 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600" /><span className="font-semibold text-slate-800">Carregando...</span></div></div>;
+}
+
 function InstallAppPrompt() {
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [visible, setVisible] = useState(false);
@@ -4487,8 +4520,8 @@ export function App() {
 
   const publicRegistrationToken = new URLSearchParams(window.location.search).get("cadastroCliente");
   if (publicRegistrationToken) return <PublicCustomerRegistration token={publicRegistrationToken} />;
-  if (!session) return <><Login onSession={setSession} /><InstallAppPrompt /></>;
-  return <><Layout session={session} active={page} onNavigate={setPage} onLogout={() => { localStorage.removeItem("ceo-pet-session"); setSession(null); }}>
+  if (!session) return <><GlobalLoadingIndicator /><Login onSession={setSession} /><InstallAppPrompt /></>;
+  return <><GlobalLoadingIndicator /><Layout session={session} active={page} onNavigate={setPage} onLogout={() => { localStorage.removeItem("ceo-pet-session"); setSession(null); }}>
     <div className={`mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs ${connectionState === "OFFLINE" ? "bg-amber-50 text-amber-900" : "bg-emerald-50 text-emerald-800"}`}>
       <span>{connectionState === "OFFLINE"
         ? pendingSyncCount ? `Offline — ${pendingSyncCount} alterações aguardando envio neste dispositivo` : "Offline — utilizando dados locais."
