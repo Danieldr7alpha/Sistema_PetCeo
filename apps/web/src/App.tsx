@@ -1225,7 +1225,10 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
   const dayAppointments = (date: string) => allAppointments.filter((appointment) => appointment.date.slice(0, 10) === date).filter(matchesSearch);
   const periodAppointments = view === "day" ? dayAppointments(selectedDate) : view === "week" ? weekDays(selectedDate).flatMap(dayAppointments) : monthDays(selectedDate).filter((day) => sameMonth(day, selectedDate)).flatMap(dayAppointments);
   const daysWithAppointments = new Set(allAppointments.map((appointment) => appointment.date.slice(0, 10)));
-  const halfHourSlots = Array.from({ length: 48 }, (_, index) => `${String(Math.floor(index / 2)).padStart(2, "0")}:${index % 2 === 0 ? "00" : "30"}`);
+  const halfHourSlots = Array.from({ length: 36 }, (_, index) => {
+    const totalMinutes = 6 * 60 + index * 30;
+    return `${String(Math.floor(totalMinutes / 60)).padStart(2, "0")}:${String(totalMinutes % 60).padStart(2, "0")}`;
+  });
   const customTimes = periodAppointments.map((appointment) => appointment.startTime.slice(0, 5));
   const timeSlots = [...new Set([...halfHourSlots, ...customTimes])].sort((a, b) => a.localeCompare(b));
   function openAt(time: string, date = selectedDate) {
