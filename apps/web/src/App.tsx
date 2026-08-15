@@ -1,11 +1,15 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { Check, Clock3, CreditCard, Eye, EyeOff, Lock, Pencil, Plus, Search, Tag, Trash2, XCircle } from "lucide-react";
+import { Check, Clock3, CreditCard, Download, Eye, EyeOff, Lock, Pencil, Plus, Search, Share2, Tag, Trash2, XCircle } from "lucide-react";
 import { Layout } from "./components/Layout";
 import { Modal } from "./components/Modal";
 import { ApiError, api, checkConnection, currency, dateBR, type ConnectionFailure, type Session } from "./lib/api";
 import { pendingOperations } from "./lib/offline";
 
 type Gender = "MALE" | "FEMALE" | "OTHER" | "UNINFORMED";
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+};
 type PetStatus = "ACTIVE" | "INACTIVE" | "DECEASED";
 type Customer = {
   id: string; internalCode?: number; matchedPetId?: string; matchedPetName?: string; name: string; cpf: string; gender: Gender; customGender?: string; phone: string;
@@ -4290,6 +4294,59 @@ function PublicCustomerRegistration({ token }: { token: string }) {
   return <main className="min-h-screen bg-slate-100 px-3 py-5 sm:px-6 sm:py-8"><form className="panel mx-auto grid max-w-3xl gap-6 overflow-hidden p-4 sm:p-7" onSubmit={submit}><header><p className="text-sm font-semibold text-blue-700">{data?.companyName ?? "Carregando empresa..."}</p><h1 className="mt-1 text-2xl font-semibold">Cadastro de cliente e pet</h1><p className="mt-2 text-sm text-slate-600">Preencha seus dados para agilizar o atendimento. Campos com * são obrigatórios.</p></header><section className="grid gap-3 sm:grid-cols-2"><h2 className="sm:col-span-2 font-semibold">Seus dados</h2><label className="text-sm font-medium">Nome completo *<input className="field mt-1" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label><label className="text-sm font-medium">CPF *<input className="field mt-1" required inputMode="numeric" value={formatCpf(form.cpf)} onChange={(e) => setForm({ ...form, cpf: onlyDigits(e.target.value, 11) })} /></label><label className="text-sm font-medium sm:col-span-2">Celular / WhatsApp *<input className="field mt-1" required inputMode="tel" value={formatPhone(form.phone)} onChange={(e) => setForm({ ...form, phone: onlyDigits(e.target.value, 11) })} /></label></section><section className="grid gap-3 sm:grid-cols-2"><h2 className="sm:col-span-2 font-semibold">Endereço</h2><label className="text-sm font-medium">CEP<input className="field mt-1" inputMode="numeric" value={formatCep(form.zipCode)} onBlur={lookupCep} onChange={(e) => setForm({ ...form, zipCode: onlyDigits(e.target.value, 8) })} /></label><label className="text-sm font-medium">Rua<input className="field mt-1" value={form.street} onChange={(e) => setForm({ ...form, street: e.target.value })} /></label><label className="text-sm font-medium">Número<input className="field mt-1" value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} /></label><label className="text-sm font-medium">Complemento<input className="field mt-1" value={form.complement} onChange={(e) => setForm({ ...form, complement: e.target.value })} /></label><label className="text-sm font-medium">Bairro<input className="field mt-1" value={form.neighborhood} onChange={(e) => setForm({ ...form, neighborhood: e.target.value })} /></label><label className="text-sm font-medium">Cidade<input className="field mt-1" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /></label><label className="text-sm font-medium">Estado<input className="field mt-1" value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} /></label>{lookingUpCep && <p className="self-end text-sm text-blue-700">Consultando CEP...</p>}</section><section className="grid gap-3 sm:grid-cols-2"><h2 className="sm:col-span-2 font-semibold">Dados do pet</h2><label className="text-sm font-medium">Nome do pet *<input className="field mt-1" required value={form.petName} onChange={(e) => setForm({ ...form, petName: e.target.value })} /></label><label className="text-sm font-medium">Espécie *<select className="field mt-1" value={form.species} onChange={(e) => setForm({ ...form, species: e.target.value })}><option value="DOG">Cão</option><option value="CAT">Gato</option><option value="OTHER">Outro</option></select></label>{form.species === "OTHER" && <label className="text-sm font-medium">Qual espécie? *<input className="field mt-1" required value={form.customSpecies} onChange={(e) => setForm({ ...form, customSpecies: e.target.value })} /></label>}<label className="text-sm font-medium">Raça<input className="field mt-1" value={form.breed} onChange={(e) => setForm({ ...form, breed: e.target.value })} /></label><label className="text-sm font-medium">Sexo<select className="field mt-1" value={form.petGender} onChange={(e) => setForm({ ...form, petGender: e.target.value })}><option value="UNINFORMED">Não informado</option><option value="MALE">Macho</option><option value="FEMALE">Fêmea</option></select></label><label className="text-sm font-medium">Porte<select className="field mt-1" value={form.size} onChange={(e) => setForm({ ...form, size: e.target.value })}><option value="SMALL">Pequeno</option><option value="MEDIUM">Médio</option><option value="LARGE">Grande</option><option value="GIANT">Gigante</option></select></label><label className="text-sm font-medium">Cor<input className="field mt-1" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} /></label><label className="text-sm font-medium sm:col-span-2">Observações importantes<textarea className="field mt-1" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label></section>{error && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}<button className="btn btn-primary w-full sm:justify-self-end sm:w-auto" disabled={saving || !data}>{saving ? "Enviando..." : "Concluir cadastro"}</button></form></main>;
 }
 
+function InstallAppPrompt() {
+  const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
+  const [visible, setVisible] = useState(false);
+  const [showIosHelp, setShowIosHelp] = useState(false);
+  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+
+  useEffect(() => {
+    const standalone = window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone;
+    const mobile = window.matchMedia("(max-width: 1023px), (pointer: coarse)").matches;
+    const dismissedAt = Number(localStorage.getItem("ceo-pet-install-dismissed") ?? 0);
+    if (standalone || !mobile || Date.now() - dismissedAt < 7 * 24 * 60 * 60 * 1000) return;
+    const timer = window.setTimeout(() => setVisible(true), 1200);
+    const beforeInstall = (event: Event) => {
+      event.preventDefault();
+      setInstallEvent(event as BeforeInstallPromptEvent);
+      setVisible(true);
+    };
+    const installed = () => { setVisible(false); setInstallEvent(null); };
+    window.addEventListener("beforeinstallprompt", beforeInstall);
+    window.addEventListener("appinstalled", installed);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("beforeinstallprompt", beforeInstall);
+      window.removeEventListener("appinstalled", installed);
+    };
+  }, []);
+
+  function dismiss() {
+    localStorage.setItem("ceo-pet-install-dismissed", String(Date.now()));
+    setVisible(false);
+  }
+  async function install() {
+    if (installEvent) {
+      await installEvent.prompt();
+      const choice = await installEvent.userChoice;
+      if (choice.outcome === "accepted") setVisible(false);
+      setInstallEvent(null);
+      return;
+    }
+    setShowIosHelp(true);
+  }
+  if (!visible) return null;
+  return <div className="fixed inset-x-3 bottom-20 z-[70] mx-auto max-w-md rounded-2xl border border-blue-200 bg-white p-4 shadow-2xl md:bottom-5" role="dialog" aria-label="Instalar CEO Pet AI">
+    <div className="flex items-start gap-3">
+      <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-blue-600 text-white"><Download size={22} /></div>
+      <div className="min-w-0 flex-1"><h2 className="font-semibold text-slate-900">Instalar CEO Pet AI</h2><p className="mt-1 text-sm text-slate-600">Use o sistema como aplicativo, direto na tela inicial do celular.</p></div>
+      <button className="p-1 text-slate-500" aria-label="Agora não" onClick={dismiss}>✕</button>
+    </div>
+    {showIosHelp && <div className="mt-3 rounded-lg bg-blue-50 p-3 text-sm text-blue-900"><p className="flex items-center gap-2 font-semibold"><Share2 size={17} /> No iPhone ou iPad</p><p className="mt-1">Toque em Compartilhar no Safari e depois em <b>Adicionar à Tela de Início</b>.</p></div>}
+    <div className="mt-4 flex gap-2"><button className="btn btn-secondary flex-1" onClick={dismiss}>Agora não</button><button className="btn btn-primary flex-1" onClick={() => void install()}>{isIos && !installEvent ? "Ver como instalar" : "Instalar aplicativo"}</button></div>
+  </div>;
+}
+
 export function App() {
   const [session, setSession] = useState<Session | null>(() => {
     const saved = localStorage.getItem("ceo-pet-session");
@@ -4403,8 +4460,8 @@ export function App() {
 
   const publicRegistrationToken = new URLSearchParams(window.location.search).get("cadastroCliente");
   if (publicRegistrationToken) return <PublicCustomerRegistration token={publicRegistrationToken} />;
-  if (!session) return <Login onSession={setSession} />;
-  return <Layout session={session} active={page} onNavigate={setPage} onLogout={() => { localStorage.removeItem("ceo-pet-session"); setSession(null); }}>
+  if (!session) return <><Login onSession={setSession} /><InstallAppPrompt /></>;
+  return <><Layout session={session} active={page} onNavigate={setPage} onLogout={() => { localStorage.removeItem("ceo-pet-session"); setSession(null); }}>
     <div className={`mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs ${connectionState === "OFFLINE" ? "bg-amber-50 text-amber-900" : "bg-emerald-50 text-emerald-800"}`}>
       <span>{connectionState === "OFFLINE"
         ? pendingSyncCount ? `Offline — ${pendingSyncCount} alterações aguardando envio neste dispositivo` : "Offline — utilizando dados locais."
@@ -4418,5 +4475,5 @@ export function App() {
       <button className="btn btn-secondary shrink-0 justify-center" disabled={retryingConnection} onClick={retryConnection}>{retryingConnection ? "Verificando..." : "Tentar novamente"}</button>
     </div>}
     {screen}
-  </Layout>;
+  </Layout><InstallAppPrompt /></>;
 }
