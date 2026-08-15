@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { Check, Clock3, CreditCard, Download, Eye, EyeOff, Lock, Pencil, Plus, Search, Share2, Tag, Trash2, XCircle } from "lucide-react";
+import { Check, Clock3, CreditCard, Download, Eye, EyeOff, Lock, Maximize2, Minimize2, Pencil, Plus, Search, Share2, Tag, Trash2, XCircle } from "lucide-react";
 import { Layout } from "./components/Layout";
 import { Modal } from "./components/Modal";
 import { ApiError, api, checkConnection, currency, dateBR, type ConnectionFailure, type Session } from "./lib/api";
@@ -1168,6 +1168,18 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
   const [draggedAppointmentId, setDraggedAppointmentId] = useState("");
   const [dragOverSlot, setDragOverSlot] = useState("");
   const [dragError, setDragError] = useState("");
+  const [calendarExpanded, setCalendarExpanded] = useState(false);
+  useEffect(() => {
+    if (!calendarExpanded) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setCalendarExpanded(false); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [calendarExpanded]);
   async function move(id: string, status: string) {
     setLoadingId(id);
     try {
@@ -1320,7 +1332,7 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
     <div className="agenda-responsive grid gap-4 lg:grid-cols-[280px_1fr]">
       <aside className="hidden lg:block">{miniCalendar()}</aside>
       <div className="lg:hidden"><button className="btn btn-secondary w-full" onClick={() => setCalendarOpen(true)}>Escolher data</button></div>
-    <div className="panel overflow-hidden">
+    <div className={`panel overflow-hidden ${calendarExpanded ? "agenda-expanded fixed inset-0 z-[80] rounded-none border-0 bg-white" : ""}`}>
       <div className="flex flex-col gap-3 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="grid gap-3 text-sm">
           <div className="grid grid-cols-2 gap-2 sm:flex">
@@ -1338,7 +1350,7 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
             <Search className="pointer-events-none absolute left-4 top-1/2 z-10 -translate-y-1/2 text-slate-400" size={18} />
             <input className="field w-full !pl-12 sm:w-72" placeholder="Buscar cliente, pet, telefone, CPF ou serviço" value={search} onChange={(event) => setSearch(event.target.value)} />
           </label>
-          <span className="text-sm font-semibold text-slate-700">🐶 {periodAppointments.length} Atendimentos</span>
+          <div className="flex items-center justify-between gap-3"><span className="text-sm font-semibold text-slate-700">🐶 {periodAppointments.length} Atendimentos</span>{view === "week" && <button className="btn btn-secondary shrink-0" type="button" title={calendarExpanded ? "Restaurar agenda" : "Expandir somente a agenda"} aria-label={calendarExpanded ? "Restaurar agenda" : "Expandir somente a agenda"} onClick={() => setCalendarExpanded((current) => !current)}>{calendarExpanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}<span className="hidden sm:inline">{calendarExpanded ? "Restaurar" : "Expandir"}</span></button>}</div>
         </div>
       </div>
       {dragError && <p className="m-3 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{dragError}</p>}

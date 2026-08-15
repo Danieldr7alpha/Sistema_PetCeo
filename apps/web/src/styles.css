@@ -65,6 +65,10 @@ button, input, select, textarea {
   @apply inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold;
 }
 
+.agenda-expanded .week-calendar-grid {
+  max-height: calc(100dvh - 112px) !important;
+}
+
 @media (max-width: 1023px) {
   .panel {
     @apply rounded-xl;
