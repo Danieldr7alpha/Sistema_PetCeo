@@ -43,6 +43,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   try {
     response = await fetch(`${API_URL}${path}`, {
       ...options,
+      cache: method === "GET" ? "no-store" : options.cache,
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
