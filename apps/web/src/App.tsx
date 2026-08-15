@@ -1161,6 +1161,9 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
   const [initialTime, setInitialTime] = useState("09:00");
   const [search, setSearch] = useState("");
   const [loadingId, setLoadingId] = useState("");
+  const [draggedAppointmentId, setDraggedAppointmentId] = useState("");
+  const [dragOverSlot, setDragOverSlot] = useState("");
+  const [dragError, setDragError] = useState("");
   async function move(id: string, status: string) {
     setLoadingId(id);
     try {
@@ -1234,12 +1237,47 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
     setView("day");
     setCalendarOpen(false);
   }
+  async function dropAppointment(date: string, startTime: string) {
+    const appointment = allAppointments.find((item) => item.id === draggedAppointmentId);
+    setDragOverSlot("");
+    setDraggedAppointmentId("");
+    if (!appointment || appointment.status !== "SCHEDULED") return;
+    if (date < localDateInput()) {
+      setDragError("Não é permitido mover um agendamento para um dia que já passou.");
+      return;
+    }
+    if (appointment.date.slice(0, 10) === date && appointment.startTime.slice(0, 5) === startTime) return;
+    setLoadingId(appointment.id);
+    setDragError("");
+    try {
+      const updated = await api<Appointment>(`/appointments/${appointment.id}/reschedule`, {
+        method: "PATCH",
+        body: JSON.stringify({ date, startTime })
+      });
+      setSelectedDate(updated.date.slice(0, 10));
+      setCalendarMonth(updated.date.slice(0, 10));
+      await refresh();
+    } catch (caught) {
+      setDragError(caught instanceof Error ? caught.message : "Não foi possível mover o agendamento.");
+    } finally {
+      setLoadingId("");
+    }
+  }
+  function dropZoneProps(date: string, time: string) {
+    const slot = `${date}-${time}`;
+    return {
+      onDragOver: (event: React.DragEvent) => { event.preventDefault(); setDragOverSlot(slot); },
+      onDragLeave: () => setDragOverSlot((current) => current === slot ? "" : current),
+      onDrop: (event: React.DragEvent) => { event.preventDefault(); void dropAppointment(date, time); }
+    };
+  }
   function appointmentCard(appointment: Appointment, compact = false) {
     const color = appointmentColor(appointment.status);
     const renewalReminder = appointment.membershipRenewal?.status === "PENDING_PAYMENT";
     const membership = appointment.membership;
     const usage = appointment.membershipUsage;
-    return <button className={`rounded-lg border p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${renewalReminder ? "border-fuchsia-400 bg-fuchsia-100 ring-2 ring-fuchsia-300" : color.card}`} key={appointment.id} onClick={() => setSelectedAppointment(appointment)}>
+    const canDrag = appointment.status === "SCHEDULED";
+    return <button draggable={canDrag} title={canDrag ? "Segure e arraste para outro dia ou horário" : undefined} className={`rounded-lg border p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${canDrag ? "cursor-grab active:cursor-grabbing" : ""} ${loadingId === appointment.id ? "opacity-50" : ""} ${renewalReminder ? "border-fuchsia-400 bg-fuchsia-100 ring-2 ring-fuchsia-300" : color.card}`} key={appointment.id} onDragStart={(event) => { if (!canDrag) return; event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", appointment.id); setDraggedAppointmentId(appointment.id); setDragError(""); }} onDragEnd={() => { setDraggedAppointmentId(""); setDragOverSlot(""); }} onClick={() => { if (!draggedAppointmentId) setSelectedAppointment(appointment); }}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2"><span className={`h-3 w-3 rounded-full ${color.dot}`} /><b>{compact ? `${appointment.startTime} - ${appointment.pet.name}` : appointment.pet.name}</b></div>
@@ -1299,8 +1337,9 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
           <span className="text-sm font-semibold text-slate-700">🐶 {periodAppointments.length} Atendimentos</span>
         </div>
       </div>
-      {view === "day" && <><div className="hidden max-h-[70vh] overflow-y-auto md:block">{hours.map((hour) => <div className="grid min-h-24 grid-cols-[72px_1fr] border-b border-slate-100" key={hour}><button className="border-r border-slate-100 p-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50" onClick={() => openAt(hour)}>{hour}</button><div className="grid gap-2 p-3" onClick={(event) => { if (event.currentTarget === event.target) openAt(hour); }}>{dayAppointments(selectedDate).filter((appointment) => appointment.startTime.slice(0, 2) === hour.slice(0, 2)).map((appointment) => appointmentCard(appointment))}</div></div>)}</div><div className="grid gap-3 p-3 md:hidden">{dayAppointments(selectedDate).map((appointment) => appointmentCard(appointment, true))}{!dayAppointments(selectedDate).length && <p className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-sm text-slate-500">Nenhum atendimento encontrado para este dia.</p>}</div></>}
-      {view === "week" && <><div className="hidden max-h-[70vh] overflow-auto md:block"><div className="grid min-w-[980px] grid-cols-[72px_repeat(7,1fr)] border-b border-slate-100 bg-slate-50">{["", ...weekDays(selectedDate)].map((day, index) => <div className="p-2 text-center text-sm font-semibold capitalize" key={index}>{day && parseLocalDate(day).toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit" })}</div>)}</div>{hours.map((hour) => <div className="grid min-w-[980px] grid-cols-[72px_repeat(7,1fr)] border-b border-slate-100" key={hour}><div className="border-r border-slate-100 p-2 text-sm font-semibold text-slate-700">{hour}</div>{weekDays(selectedDate).map((day) => <div className={`min-h-28 border-r border-slate-100 p-2 text-left hover:bg-slate-50 ${day === localDateInput() ? "bg-blue-50/50" : ""}`} key={`${day}-${hour}`} onClick={(event) => { if (event.currentTarget === event.target) openAt(hour, day); }}>{dayAppointments(day).filter((appointment) => appointment.startTime.slice(0, 2) === hour.slice(0, 2)).map((appointment) => appointmentCard(appointment, true))}</div>)}</div>)}</div><div className="grid gap-3 p-3 md:hidden">{weekDays(selectedDate).map((day) => <section className="grid gap-2" key={day}><h3 className="font-semibold capitalize">{parseLocalDate(day).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" })}</h3>{dayAppointments(day).map((appointment) => appointmentCard(appointment, true))}<button className="btn btn-secondary justify-self-start" onClick={() => openAt("09:00", day)}>Novo neste dia</button></section>)}</div></>}
+      {dragError && <p className="m-3 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{dragError}</p>}
+      {view === "day" && <><div className="hidden max-h-[70vh] overflow-y-auto md:block">{hours.map((hour) => { const slot = `${selectedDate}-${hour}`; return <div className="grid min-h-24 grid-cols-[72px_1fr] border-b border-slate-100" key={hour}><button className="border-r border-slate-100 p-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50" onClick={() => openAt(hour)}>{hour}</button><div {...dropZoneProps(selectedDate, hour)} className={`grid grid-cols-1 gap-2 p-3 xl:grid-cols-2 2xl:grid-cols-3 ${dragOverSlot === slot ? "bg-blue-100 ring-2 ring-inset ring-blue-400" : ""}`} onClick={(event) => { if (event.currentTarget === event.target) openAt(hour); }}>{dayAppointments(selectedDate).filter((appointment) => appointment.startTime.slice(0, 2) === hour.slice(0, 2)).map((appointment) => appointmentCard(appointment))}</div></div>; })}</div><div className="grid gap-3 p-3 md:hidden">{dayAppointments(selectedDate).map((appointment) => appointmentCard(appointment, true))}{!dayAppointments(selectedDate).length && <p className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-sm text-slate-500">Nenhum atendimento encontrado para este dia.</p>}</div></>}
+      {view === "week" && <><div className="hidden max-h-[70vh] overflow-auto md:block"><div className="grid min-w-[980px] grid-cols-[72px_repeat(7,1fr)] border-b border-slate-100 bg-slate-50">{["", ...weekDays(selectedDate)].map((day, index) => <div className="p-2 text-center text-sm font-semibold capitalize" key={index}>{day && parseLocalDate(day).toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit" })}</div>)}</div>{hours.map((hour) => <div className="grid min-w-[980px] grid-cols-[72px_repeat(7,1fr)] border-b border-slate-100" key={hour}><div className="border-r border-slate-100 p-2 text-sm font-semibold text-slate-700">{hour}</div>{weekDays(selectedDate).map((day) => { const slot = `${day}-${hour}`; return <div {...dropZoneProps(day, hour)} className={`min-h-28 border-r border-slate-100 p-2 text-left hover:bg-slate-50 ${day === localDateInput() ? "bg-blue-50/50" : ""} ${dragOverSlot === slot ? "bg-blue-100 ring-2 ring-inset ring-blue-400" : ""}`} key={`${day}-${hour}`} onClick={(event) => { if (event.currentTarget === event.target) openAt(hour, day); }}>{dayAppointments(day).filter((appointment) => appointment.startTime.slice(0, 2) === hour.slice(0, 2)).map((appointment) => appointmentCard(appointment, true))}</div>; })}</div>)}</div><div className="grid gap-3 p-3 md:hidden">{weekDays(selectedDate).map((day) => <section className="grid gap-2" key={day}><h3 className="font-semibold capitalize">{parseLocalDate(day).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" })}</h3>{dayAppointments(day).map((appointment) => appointmentCard(appointment, true))}<button className="btn btn-secondary justify-self-start" onClick={() => openAt("09:00", day)}>Novo neste dia</button></section>)}</div></>}
       {view === "month" && <div className="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2 md:grid-cols-7">{monthDays(selectedDate).map((day) => {
         const appointmentsOnDay = dayAppointments(day);
         return <button className={`min-h-28 rounded-lg border p-2 text-left hover:bg-slate-50 ${day === localDateInput() ? "border-blue-300 bg-blue-50/60" : "border-slate-200"} ${!sameMonth(day, selectedDate) ? "opacity-40" : ""}`} key={day} onClick={() => selectCalendarDay(day)}>
@@ -1366,7 +1405,7 @@ function AppointmentDrawer({ appointment, loadingId, onClose, onMove, onCharge, 
           <h3 className="mb-2 font-semibold">Próximas ações</h3>
           <div className="flex flex-wrap gap-2">
             {appointment.membershipRenewal?.status === "PENDING_PAYMENT" && <><button disabled={loadingId === appointment.id} className="btn btn-primary disabled:opacity-40" onClick={onRenew}>{loadingId === appointment.id ? "Processando..." : "Renovar"}</button><button disabled={loadingId === appointment.id} className="btn btn-secondary border-red-200 text-red-700 disabled:opacity-40" onClick={onCancelPackage}>Cancelar pacote</button></>}
-            {appointment.membershipId && usage?.status === "RESERVED" && appointment.status === "SCHEDULED" && <button className="btn btn-secondary" onClick={onReschedule}>Reagendar</button>}
+            {appointment.status === "SCHEDULED" && <button className="btn btn-secondary" onClick={onReschedule}>Reagendar</button>}
             <button disabled={appointment.membershipRenewal?.status === "PENDING_PAYMENT" || appointment.status !== "SCHEDULED" || loadingId === appointment.id} className="btn btn-secondary disabled:opacity-40" onClick={() => onMove(appointment.id, "ARRIVED")}>Chegou</button>
             <button disabled={appointment.membershipRenewal?.status === "PENDING_PAYMENT" || appointment.status !== "ARRIVED" || loadingId === appointment.id} className="btn btn-secondary disabled:opacity-40" onClick={() => onMove(appointment.id, "IN_SERVICE")}>Iniciar atendimento</button>
             <button disabled={appointment.membershipRenewal?.status === "PENDING_PAYMENT" || appointment.status !== "IN_SERVICE" || loadingId === appointment.id} className="btn btn-primary disabled:opacity-40" onClick={() => onMove(appointment.id, "FINISHED")}>Finalizar</button>
@@ -1400,11 +1439,11 @@ function RescheduleAppointmentForm({ appointment, onClose, onSaved }: { appointm
       setSaving(false);
     }
   }
-  return <Modal title="Reagendar mensalista" onClose={onClose}>
+  return <Modal title="Reagendar atendimento" onClose={onClose}>
     <form className="grid gap-4" onSubmit={submit}>
       <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-        <b>{appointment.pet.name} · {appointment.membership?.plan.name}</b>
-        <p className="mt-1">Esta alteração vale somente para este atendimento. O dia fixo dos próximos agendamentos não será alterado e nenhum uso adicional será consumido.</p>
+        <b>{appointment.pet.name}{appointment.membership?.plan.name ? ` · ${appointment.membership.plan.name}` : ""}</b>
+        <p className="mt-1">Você também pode fechar esta janela e arrastar o cartão diretamente para outro dia ou horário na agenda.</p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="text-sm font-medium">Nova data<input className="field mt-1" type="date" min={localDateInput()} required value={date} onChange={(event) => setDate(event.target.value)} /></label>
