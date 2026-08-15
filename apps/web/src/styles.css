@@ -199,12 +199,14 @@ button, input, select, textarea {
   }
 }
 
-/* Agenda semanal otimizada para celulares deitados: dias lado a lado como no computador. */
-@media (orientation: landscape) and (min-width: 560px) and (max-width: 1023px) {
+/* Agenda semanal no celular: horários e dias lado a lado, como no Google Agenda. */
+@media (max-width: 1023px) {
   .agenda-responsive .week-calendar-grid {
     display: block !important;
     max-height: calc(100dvh - 190px);
+    overflow: auto;
     overscroll-behavior: contain;
+    scroll-snap-type: x proximity;
     scrollbar-width: thin;
   }
 
@@ -216,10 +218,25 @@ button, input, select, textarea {
     min-width: 812px;
   }
 
+  .agenda-responsive .week-calendar-row > div:not(:first-child) {
+    scroll-snap-align: start;
+  }
+
   .agenda-responsive .week-calendar-grid button[draggable="true"] {
     min-height: 0;
     padding: 6px;
     font-size: 11px;
     line-height: 1.25;
+  }
+}
+
+@media (orientation: portrait) and (max-width: 559px) {
+  .agenda-responsive .week-calendar-grid {
+    max-height: calc(100dvh - 250px);
+  }
+
+  .agenda-responsive .week-calendar-row {
+    grid-template-columns: 52px repeat(7, minmax(118px, 1fr));
+    min-width: 878px;
   }
 }
