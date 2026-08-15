@@ -198,3 +198,28 @@ button, input, select, textarea {
     min-width: 0;
   }
 }
+
+/* Agenda semanal otimizada para celulares deitados: dias lado a lado como no computador. */
+@media (orientation: landscape) and (min-width: 560px) and (max-width: 1023px) {
+  .agenda-responsive .week-calendar-grid {
+    display: block !important;
+    max-height: calc(100dvh - 190px);
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+
+  .agenda-responsive .week-mobile-list {
+    display: none !important;
+  }
+
+  .agenda-responsive .week-calendar-row {
+    min-width: 812px;
+  }
+
+  .agenda-responsive .week-calendar-grid button[draggable="true"] {
+    min-height: 0;
+    padding: 6px;
+    font-size: 11px;
+    line-height: 1.25;
+  }
+}
