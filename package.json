@@ -12,6 +12,8 @@
     "dev:web": "npm run dev -w apps/web",
     "dev:web:launcher": "npm run dev:launcher -w apps/web",
     "build": "npm run build -w apps/api && npm run build -w apps/web",
+    "build:cloudflare": "npm run prisma:generate -w apps/api && npm run build -w apps/web && wrangler deploy --dry-run --config cloudflare/wrangler.jsonc",
+    "deploy:cloudflare:api": "wrangler deploy --config cloudflare/wrangler.jsonc",
     "setup": "npm run db:generate && npm run db:push && npm run db:seed",
     "db:generate": "npm run prisma:generate -w apps/api",
     "db:push": "npm run prisma:push -w apps/api",
@@ -26,10 +28,12 @@
     "supabase:types": "npx supabase gen types typescript --linked > apps/web/src/lib/supabase.types.ts"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "concurrently": "^9.1.0",
+    "wrangler": "^4.123.0"
   },
   "dependencies": {
     "@netlify/functions": "^5.3.0",
+    "express": "^5.2.1",
     "serverless-http": "^4.0.0"
   }
 }

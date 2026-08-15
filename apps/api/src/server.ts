@@ -1,5 +1,3 @@
-import "dotenv/config";
-import "express-async-errors";
 import cors from "cors";
 import express from "express";
 import { ZodError } from "zod";
@@ -17,7 +15,7 @@ import { financialRouter } from "./routes/financial.js";
 import { managementRouter } from "./routes/management.js";
 import { publicRegistrationRouter } from "./routes/public-registration.js";
 import { notificationsRouter } from "./routes/notifications.js";
-import { prisma } from "./lib/prisma.js";
+import { prisma, runWithPrismaScope } from "./lib/prisma.js";
 
 export const app = express();
 const allowedOrigins = new Set(
@@ -39,10 +37,18 @@ app.use(
   })
 );
 app.use(express.json());
+app.use((_req, res, next) => {
+  runWithPrismaScope((client) => {
+    res.once("finish", () => {
+      void client.$disconnect();
+    });
+    next();
+  });
+});
 
 app.get("/health", async (_req, res) => {
   try {
-    await prisma.$queryRaw`SELECT 1`;
+    await prisma.user.count();
     return res.json({ status: "ok", api: "running", database: "connected" });
   } catch (error) {
     const code = typeof error === "object" && error && "code" in error ? String(error.code) : "DATABASE_ERROR";
@@ -90,10 +96,3 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   console.error(error);
   return res.status(500).json({ message: "Erro interno" });
 });
-
-if (!process.env.NETLIFY && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
-  const port = Number(process.env.PORT ?? 3333);
-  app.listen(port, () => {
-    console.log(`CEO Pet AI API running on http://localhost:${port}`);
-  });
-}
