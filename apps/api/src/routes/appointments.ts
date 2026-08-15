@@ -220,24 +220,11 @@ appointmentsRouter.patch("/:id/reschedule", async (req, res) => {
     include: appointmentInclude
   });
   if (!current) return res.status(404).json({ message: "Agendamento não encontrado." });
-  if (!current.membershipId || current.membershipUsage?.status !== "RESERVED") {
-    return res.status(409).json({ message: "Somente um atendimento reservado de mensalista pode ser reagendado por esta opção." });
-  }
   if (current.status !== "SCHEDULED") {
     return res.status(409).json({ message: "Somente atendimentos que ainda estão agendados podem ser reagendados." });
   }
 
   const newDate = new Date(body.date);
-  const duplicate = await prisma.appointment.findFirst({
-    where: {
-      id: { not: current.id }, companyId: cid, petId: current.petId,
-      date: newDate, startTime: body.startTime, status: { not: "CANCELLED" }
-    }
-  });
-  if (duplicate) {
-    return res.status(409).json({ message: "Este pet já possui um agendamento nessa data e horário." });
-  }
-
   const oldDate = current.date.toLocaleDateString("pt-BR", { timeZone: "UTC" });
   const adjustedEndTime = body.endTime ?? shiftedEndTime(current.startTime, current.endTime, body.startTime);
   const updated = await prisma.$transaction(async (tx) => {
@@ -249,7 +236,7 @@ appointmentsRouter.patch("/:id/reschedule", async (req, res) => {
       data: {
         companyId: cid, customerId: current.customerId, petId: current.petId,
         appointmentId: current.id, membershipId: current.membershipId,
-        type: "APPOINTMENT_RESCHEDULED", title: "Atendimento de mensalista reagendado",
+        type: "APPOINTMENT_RESCHEDULED", title: "Atendimento reagendado",
         description: `${oldDate} às ${current.startTime} → ${newDate.toLocaleDateString("pt-BR", { timeZone: "UTC" })} às ${body.startTime}`
       }
     });
