@@ -6,5 +6,8 @@ import { app } from "../../apps/api/src/server.js";
 
 const netlifyApp = express();
 netlifyApp.use("/api", app);
+// Netlify sends rewrites to the function's full internal path. Mounting this
+// path too keeps /api requests from falling through to the frontend SPA.
+netlifyApp.use("/.netlify/functions/api", app);
 
 export const handler = serverless(netlifyApp);
