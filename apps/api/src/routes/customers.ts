@@ -6,18 +6,19 @@ import { companyId, requireAdmin } from "../middleware/auth.js";
 import { prisma } from "../lib/prisma.js";
 
 export const customersRouter = Router();
+const customerCodeRepairs = new Map<string, Promise<void>>();
 
 function onlyDigits(value: string) {
   return value.replace(/\D/g, "");
 }
 
-function matchesCustomerSearch(customer: { internalCode: number | null; name: string; cpf: string; phone: string; street: string | null; neighborhood: string | null; city: string | null; pets: { name: string }[] }, query: string) {
+function matchesCustomerSearch(customer: { internalCode: number | null; name: string; cpf: string | null; phone: string; street: string | null; neighborhood: string | null; city: string | null; pets: { name: string }[] }, query: string) {
   const normalized = query.trim().toLocaleLowerCase("pt-BR");
   if (!normalized) return true;
   const digits = onlyDigits(query);
   return customer.name.toLocaleLowerCase("pt-BR").includes(normalized)
     || String(customer.internalCode ?? "").padStart(4, "0").includes(digits || normalized.replace("#", ""))
-    || Boolean(digits && onlyDigits(customer.cpf).includes(digits))
+    || Boolean(digits && onlyDigits(customer.cpf ?? "").includes(digits))
     || Boolean(digits && onlyDigits(customer.phone).includes(digits))
     || Boolean(customer.street?.toLocaleLowerCase("pt-BR").includes(normalized))
     || Boolean(customer.neighborhood?.toLocaleLowerCase("pt-BR").includes(normalized))
@@ -26,23 +27,37 @@ function matchesCustomerSearch(customer: { internalCode: number | null; name: st
 }
 
 async function ensureCustomerCodes(cid: string) {
-  const missingCodes = await prisma.customer.findMany({
-    where: { companyId: cid, internalCode: null },
-    orderBy: { createdAt: "asc" },
-    select: { id: true }
-  });
-  if (!missingCodes.length) return;
-  const last = await prisma.customer.findFirst({
-    where: { companyId: cid, internalCode: { not: null } },
-    orderBy: { internalCode: "desc" },
-    select: { internalCode: true }
-  });
-  let nextCode = (last?.internalCode ?? 0) + 1;
-  for (const customer of missingCodes) {
-    await prisma.customer.update({
-      where: { id: customer.id },
-      data: { internalCode: nextCode++ }
-    });
+  // This only repairs records created before internal codes existed. Running
+  // the scan for every search made typing progressively slower as data grew.
+  let repair = customerCodeRepairs.get(cid);
+  if (!repair) {
+    repair = (async () => {
+      const missingCodes = await prisma.customer.findMany({
+        where: { companyId: cid, internalCode: null },
+        orderBy: { createdAt: "asc" },
+        select: { id: true }
+      });
+      if (!missingCodes.length) return;
+      const last = await prisma.customer.findFirst({
+        where: { companyId: cid, internalCode: { not: null } },
+        orderBy: { internalCode: "desc" },
+        select: { internalCode: true }
+      });
+      let nextCode = (last?.internalCode ?? 0) + 1;
+      for (const customer of missingCodes) {
+        await prisma.customer.update({
+          where: { id: customer.id },
+          data: { internalCode: nextCode++ }
+        });
+      }
+    })();
+    customerCodeRepairs.set(cid, repair);
+  }
+  try {
+    await repair;
+  } catch (error) {
+    customerCodeRepairs.delete(cid);
+    throw error;
   }
 }
 
@@ -96,7 +111,7 @@ const petSchema = z.object({
 
 const customerSchema = z.object({
   name: z.string().min(1),
-  cpf: z.string().min(1).transform((value) => onlyDigits(value).slice(0, 11)),
+  cpf: z.string().optional().transform((value) => onlyDigits(value ?? "").slice(0, 11) || null),
   gender: z.enum(["MALE", "FEMALE", "OTHER", "UNINFORMED"]).default("UNINFORMED"),
   customGender: z.string().trim().optional(),
   phone: z.string().min(1).transform((value) => onlyDigits(value).slice(0, 11)),
@@ -138,20 +153,33 @@ customersRouter.get("/search", async (req, res) => {
   await ensureCustomerCodes(cid);
   const q = String(req.query.q ?? "").trim();
   if (q.length < 2) return res.json([]);
+  const normalized = q.toLocaleLowerCase("pt-BR");
+  const qDigits = onlyDigits(q);
+  const parsedCode = /^\d{1,9}$/.test(qDigits) ? Number(qDigits) : undefined;
+  const code = parsedCode && parsedCode <= 2_147_483_647 ? parsedCode : undefined;
+  const text = qDigits || q;
   const customers = await prisma.customer.findMany({
-    where: { companyId: cid },
+    where: {
+      companyId: cid,
+      OR: [
+        ...(code ? [{ internalCode: code }] : []),
+        { name: { contains: q, mode: "insensitive" } },
+        { cpf: { contains: text } },
+        { phone: { contains: text } },
+        { street: { contains: q, mode: "insensitive" } },
+        { neighborhood: { contains: q, mode: "insensitive" } },
+        { city: { contains: q, mode: "insensitive" } },
+        { pets: { some: { name: { contains: q, mode: "insensitive" } } } }
+      ]
+    },
     include: {
       pets: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
       memberships: { include: { plan: { include: { service: true } }, pet: true } }
     },
     orderBy: [{ internalCode: "asc" }, { createdAt: "asc" }],
+    take: 50
   });
-  const normalized = q.toLocaleLowerCase("pt-BR");
-  const qDigits = onlyDigits(q);
-  const parsedCode = /^\d{1,9}$/.test(qDigits) ? Number(qDigits) : undefined;
-  const code = parsedCode && parsedCode <= 2_147_483_647 ? parsedCode : undefined;
   const results = customers
-    .filter((customer) => matchesCustomerSearch(customer, q))
     .map((customer) => {
       const matchedPet = customer.pets.find((pet) => pet.name.toLowerCase().includes(normalized));
       const exactCode = code && customer.internalCode === code ? 0 : 1;

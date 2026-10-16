@@ -21,7 +21,7 @@ function validCpf(value: string) {
 
 const registrationSchema = z.object({
   name: z.string().trim().min(3),
-  cpf: z.string().transform(digits).refine(validCpf, "CPF inválido"),
+  cpf: z.string().optional().transform((value) => digits(value ?? "") || null).refine((value) => !value || validCpf(value), "CPF inválido"),
   phone: z.string().transform(digits).refine((value) => value.length >= 10 && value.length <= 11),
   zipCode: z.string().transform(digits).optional(),
   street: z.string().trim().optional(), number: z.string().trim().optional(), complement: z.string().trim().optional(),

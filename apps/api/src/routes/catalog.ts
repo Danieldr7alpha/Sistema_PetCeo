@@ -6,6 +6,8 @@ import { companyId } from "../middleware/auth.js";
 import { prisma } from "../lib/prisma.js";
 
 export const catalogRouter = Router();
+const productLookupBackfills = new Map<string, Promise<void>>();
+const serviceLookupBackfills = new Map<string, Promise<void>>();
 
 const optionalText = z.preprocess((value) => value === "" ? undefined : value, z.string().optional());
 const optionalDecimal = z.preprocess((value) => value === "" || value === null ? undefined : value, z.coerce.number().nonnegative().optional());
@@ -243,38 +245,56 @@ async function validateAdminPassword(req: Request, res: Response) {
 }
 
 async function backfillProductLookups(cid: string) {
-  const products = await prisma.product.findMany({ where: { companyId: cid } });
-  for (const product of products) {
-    if ((!product.category || product.categoryId) && (!product.brand || product.brandId) && (!product.supplier || product.supplierId)) continue;
-    const lookupData = await productLookupData(cid, {
-      category: product.category ?? undefined,
-      brand: product.brand ?? undefined,
-      supplier: product.supplier ?? undefined
-    });
-    await prisma.product.update({
-      where: { id: product.id },
-      data: {
-        category: lookupData.category,
-        categoryId: lookupData.categoryId,
-        brand: lookupData.brand,
-        brandId: lookupData.brandId,
-        supplier: lookupData.supplier,
-        supplierId: lookupData.supplierId
-      }
-    });
+  await runLookupBackfill(productLookupBackfills, cid, async () => {
+    const products = await prisma.product.findMany({ where: { companyId: cid } });
+    for (const product of products) {
+      if ((!product.category || product.categoryId) && (!product.brand || product.brandId) && (!product.supplier || product.supplierId)) continue;
+      const lookupData = await productLookupData(cid, {
+        category: product.category ?? undefined,
+        brand: product.brand ?? undefined,
+        supplier: product.supplier ?? undefined
+      });
+      await prisma.product.update({
+        where: { id: product.id },
+        data: {
+          category: lookupData.category,
+          categoryId: lookupData.categoryId,
+          brand: lookupData.brand,
+          brandId: lookupData.brandId,
+          supplier: lookupData.supplier,
+          supplierId: lookupData.supplierId
+        }
+      });
+    }
+  });
+}
+
+async function runLookupBackfill(backfills: Map<string, Promise<void>>, cid: string, task: () => Promise<void>) {
+  let backfill = backfills.get(cid);
+  if (!backfill) {
+    backfill = task();
+    backfills.set(cid, backfill);
+  }
+  try {
+    await backfill;
+  } catch (error) {
+    backfills.delete(cid);
+    throw error;
   }
 }
 
 async function backfillServiceLookups(cid: string) {
-  const services = await prisma.service.findMany({ where: { companyId: cid } });
-  for (const service of services) {
-    if (!service.category || service.categoryId) continue;
-    const lookupData = await serviceLookupData(cid, { category: service.category });
-    await prisma.service.update({
-      where: { id: service.id },
-      data: { category: lookupData.category, categoryId: lookupData.categoryId }
-    });
-  }
+  await runLookupBackfill(serviceLookupBackfills, cid, async () => {
+    const services = await prisma.service.findMany({ where: { companyId: cid } });
+    for (const service of services) {
+      if (!service.category || service.categoryId) continue;
+      const lookupData = await serviceLookupData(cid, { category: service.category });
+      await prisma.service.update({
+        where: { id: service.id },
+        data: { category: lookupData.category, categoryId: lookupData.categoryId }
+      });
+    }
+  });
 }
 
 async function updateReusableOption(kind: typeof reusableKinds[number], cid: string, id: string, name: string) {

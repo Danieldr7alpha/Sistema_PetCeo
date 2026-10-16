@@ -12,7 +12,7 @@ type BeforeInstallPromptEvent = Event & {
 };
 type PetStatus = "ACTIVE" | "INACTIVE" | "DECEASED";
 type Customer = {
-  id: string; internalCode?: number; matchedPetId?: string; matchedPetName?: string; name: string; cpf: string; gender: Gender; customGender?: string; phone: string;
+  id: string; internalCode?: number; matchedPetId?: string; matchedPetName?: string; name: string; cpf?: string | null; gender: Gender; customGender?: string; phone: string;
   zipCode?: string; street?: string; number?: string; complement?: string; neighborhood?: string; city?: string; state?: string;
   pets: Pet[]; memberships?: Membership[];
 };
@@ -145,8 +145,8 @@ function serviceCoatLabel(value?: string) {
   return value || "Não informado";
 }
 
-function formatCpf(value: string) {
-  const digits = onlyDigits(value, 11);
+function formatCpf(value?: string | null) {
+  const digits = onlyDigits(value ?? "", 11);
   return digits
     .replace(/^(\d{3})(\d)/, "$1.$2")
     .replace(/^(\d{3})\.(\d{3})(\d)/, "$1.$2.$3")
@@ -735,7 +735,12 @@ function Dashboard() {
 
 function Customers() {
   const [q, setQ] = useState("");
-  const { data, error, refresh } = useData<Customer[]>(`/customers?q=${encodeURIComponent(q)}`, [q]);
+  const [debouncedQ, setDebouncedQ] = useState("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQ(q), 300);
+    return () => window.clearTimeout(timer);
+  }, [q]);
+  const { data, error, refresh } = useData<Customer[]>(`/customers?q=${encodeURIComponent(debouncedQ)}`, [debouncedQ]);
   const [modal, setModal] = useState<"new" | "detail" | "edit" | null>(null);
   const [selected, setSelected] = useState<Customer | null>(null);
   const [registrationLinkOpen, setRegistrationLinkOpen] = useState(false);
@@ -759,7 +764,7 @@ function CustomerRegistrationLinkModal({ onClose }: { onClose: () => void }) {
   async function generate() { setLoading(true); setMessage(""); try { const result = await api<{ url: string }>("/customers/registration-link", { method: "POST" }); setLink(result.url); } catch (error) { setMessage(error instanceof Error ? error.message : "Não foi possível gerar o link."); } finally { setLoading(false); } }
   async function copy() { await navigator.clipboard.writeText(link); setMessage("Link copiado."); }
   const whatsAppMessage = `Olá! Para finalizar seu agendamento, precisamos que você preencha seu cadastro pelo link abaixo.\n\n${link}`;
-  return <Modal title="Enviar cadastro para o cliente" onClose={onClose}><div className="grid gap-4"><div className="rounded-xl border border-blue-200 bg-blue-50 p-4"><h3 className="font-semibold text-blue-950">Cadastro pelo próprio cliente</h3><p className="mt-1 text-sm text-blue-800">O link é seguro, vale por 7 dias e só pode ser utilizado uma vez. O CPF será obrigatório.</p></div>{!link ? <button className="btn btn-primary w-full" disabled={loading} onClick={generate}>{loading ? "Gerando link..." : "Gerar link de cadastro"}</button> : <><label className="text-sm font-medium">Link para enviar<input className="field mt-1" readOnly value={link} /></label><div className="grid grid-cols-2 gap-2"><button className="btn btn-secondary" type="button" onClick={copy}>Copiar link</button><button className="btn btn-primary" type="button" onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(whatsAppMessage)}`, "_blank")}>Enviar no WhatsApp</button></div><button className="text-sm font-semibold text-blue-700" type="button" onClick={() => { setLink(""); setMessage(""); }}>Gerar outro link</button></>}{message && <p className={`rounded-lg p-3 text-sm ${message === "Link copiado." ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{message}</p>}</div></Modal>;
+  return <Modal title="Enviar cadastro para o cliente" onClose={onClose}><div className="grid gap-4"><div className="rounded-xl border border-blue-200 bg-blue-50 p-4"><h3 className="font-semibold text-blue-950">Cadastro pelo próprio cliente</h3><p className="mt-1 text-sm text-blue-800">O link é seguro, vale por 7 dias e só pode ser utilizado uma vez. O CPF é opcional.</p></div>{!link ? <button className="btn btn-primary w-full" disabled={loading} onClick={generate}>{loading ? "Gerando link..." : "Gerar link de cadastro"}</button> : <><label className="text-sm font-medium">Link para enviar<input className="field mt-1" readOnly value={link} /></label><div className="grid grid-cols-2 gap-2"><button className="btn btn-secondary" type="button" onClick={copy}>Copiar link</button><button className="btn btn-primary" type="button" onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(whatsAppMessage)}`, "_blank")}>Enviar no WhatsApp</button></div><button className="text-sm font-semibold text-blue-700" type="button" onClick={() => { setLink(""); setMessage(""); }}>Gerar outro link</button></>}{message && <p className={`rounded-lg p-3 text-sm ${message === "Link copiado." ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{message}</p>}</div></Modal>;
 }
 
 function CustomerForm({ customerId, onClose, onSaved }: { customerId?: string; onClose: () => void; onSaved: () => void }) {
@@ -776,7 +781,7 @@ function CustomerForm({ customerId, onClose, onSaved }: { customerId?: string; o
 
   useEffect(() => {
     if (data && isEdit) {
-      setForm((current) => ({ ...current, name: data.name, cpf: onlyDigits(data.cpf, 11), gender: data.gender, customGender: data.customGender ?? "", phone: onlyDigits(data.phone, 11), zipCode: onlyDigits(data.zipCode ?? "", 8), street: data.street ?? "", number: data.number ?? "", complement: data.complement ?? "", neighborhood: data.neighborhood ?? "", city: data.city ?? "", state: data.state ?? "" }));
+      setForm((current) => ({ ...current, name: data.name, cpf: onlyDigits(data.cpf ?? "", 11), gender: data.gender, customGender: data.customGender ?? "", phone: onlyDigits(data.phone, 11), zipCode: onlyDigits(data.zipCode ?? "", 8), street: data.street ?? "", number: data.number ?? "", complement: data.complement ?? "", neighborhood: data.neighborhood ?? "", city: data.city ?? "", state: data.state ?? "" }));
     }
   }, [data?.id, isEdit]);
 
@@ -791,7 +796,7 @@ function CustomerForm({ customerId, onClose, onSaved }: { customerId?: string; o
     event.preventDefault();
     if (saving) return;
     setError("");
-    const payload = { name: form.name, cpf: onlyDigits(form.cpf, 11), gender: form.gender, customGender: form.customGender, phone: onlyDigits(form.phone, 11), zipCode: onlyDigits(form.zipCode, 8), street: form.street, number: form.number, complement: form.complement, neighborhood: form.neighborhood, city: form.city, state: form.state };
+    const payload = { name: form.name, cpf: onlyDigits(form.cpf, 11) || undefined, gender: form.gender, customGender: form.customGender, phone: onlyDigits(form.phone, 11), zipCode: onlyDigits(form.zipCode, 8), street: form.street, number: form.number, complement: form.complement, neighborhood: form.neighborhood, city: form.city, state: form.state };
     if (form.gender === "OTHER" && !form.customGender.trim()) {
       setError("Informe o gênero personalizado do tutor.");
       return;
@@ -831,7 +836,7 @@ function CustomerForm({ customerId, onClose, onSaved }: { customerId?: string; o
   }
 
   return <Modal title={isEdit ? "Editar Cliente" : "Adicionar Cliente"} onClose={onClose}><form onSubmit={submit} className="grid gap-4">
-    <Section title="Tutor"><input className="field" required placeholder="Nome completo" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /><input className="field" required inputMode="numeric" placeholder="CPF" value={formatCpf(form.cpf)} onChange={(e) => setForm({ ...form, cpf: onlyDigits(e.target.value, 11) })} />{form.gender === "OTHER" ? <input className="field" autoFocus placeholder="Digite o gênero" value={form.customGender} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }} onChange={(e) => setForm({ ...form, customGender: e.target.value })} /> : <select className="field" value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value as Gender })}>{Object.entries(genderLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>}<input className="field" required inputMode="numeric" placeholder="Celular/WhatsApp" value={formatPhone(form.phone)} onChange={(e) => setForm({ ...form, phone: onlyDigits(e.target.value, 11) })} /></Section>
+    <Section title="Tutor"><input className="field" required placeholder="Nome completo" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /><input className="field" inputMode="numeric" placeholder="CPF (opcional)" value={formatCpf(form.cpf)} onChange={(e) => setForm({ ...form, cpf: onlyDigits(e.target.value, 11) })} />{form.gender === "OTHER" ? <input className="field" autoFocus placeholder="Digite o gênero" value={form.customGender} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }} onChange={(e) => setForm({ ...form, customGender: e.target.value })} /> : <select className="field" value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value as Gender })}>{Object.entries(genderLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>}<input className="field" required inputMode="numeric" placeholder="Celular/WhatsApp" value={formatPhone(form.phone)} onChange={(e) => setForm({ ...form, phone: onlyDigits(e.target.value, 11) })} /></Section>
     <Section title="Endereço"><input className="field" inputMode="numeric" placeholder="CEP" value={formatCep(form.zipCode)} onBlur={cep} onChange={(e) => setForm({ ...form, zipCode: onlyDigits(e.target.value, 8) })} /><input className="field" placeholder="Rua" value={form.street} onChange={(e) => setForm({ ...form, street: e.target.value })} /><input className="field" placeholder="Número" value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} /><input className="field" placeholder="Complemento" value={form.complement} onChange={(e) => setForm({ ...form, complement: e.target.value })} /><input className="field" placeholder="Bairro" value={form.neighborhood} onChange={(e) => setForm({ ...form, neighborhood: e.target.value })} /><input className="field" placeholder="Cidade" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /><input className="field" placeholder="Estado" value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} /></Section>
     {!isEdit && <><Section title="Pet inicial"><input className="field" required placeholder="Nome do pet" value={form.petName} onChange={(e) => setForm({ ...form, petName: e.target.value })} /><PetBasics form={form} setForm={setForm} /></Section><div className="rounded-md border border-slate-200 p-3"><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-sm font-semibold">Pets adicionais</h3><p className="text-sm text-slate-500">Adicione outros pets deste tutor antes de salvar o cliente.</p></div><button className="btn btn-secondary" type="button" onClick={() => { setEditingPendingPetIndex(null); setPendingPetOpen(true); }}><Plus size={16} />Novo pet</button></div>{pendingPets.length > 0 && <div className="mt-3 grid gap-2">{pendingPets.map((pet, index) => <div className="rounded-md border border-slate-200 p-3" key={`${pet.name}-${index}`}><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><b>{pet.name}</b><p className="text-sm text-slate-500">{petSizeLabels[pet.size] ?? pet.size} · {petGenderLabels[pet.gender] ?? pet.gender} · {petStatusLabels[pet.status]}</p></div><div className="flex flex-wrap gap-2"><button className="btn btn-secondary" type="button" onClick={() => { setEditingPendingPetIndex(index); setPendingPetOpen(true); }}><Pencil size={16} />Editar</button><button className="btn btn-secondary" type="button" onClick={() => setPendingPets((current) => current.filter((_, petIndex) => petIndex !== index))}><Trash2 size={16} />Remover</button></div></div></div>)}</div>}</div></>}
     {isEdit && data && <div><div className="mb-2 flex items-center justify-between"><h3 className="text-sm font-semibold">Pets</h3><button className="btn btn-secondary" type="button" onClick={() => { setEditingPet(null); setPetOpen(true); }}><Plus size={16} />Novo pet</button></div><div className="grid gap-2">{data.pets.map((pet) => <div className="rounded-md border border-slate-200 p-3" key={pet.id}><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><b>{pet.name}</b><p className="text-sm text-slate-500">{petStatusLabels[pet.status]} {pet.isPrimary ? "| Principal" : ""}</p></div><button className="btn btn-secondary" type="button" onClick={() => { setEditingPet(pet); setPetOpen(true); }}><Pencil size={16} />Editar pet</button></div></div>)}</div></div>}
@@ -2125,12 +2130,17 @@ function isFinalizedAppointmentSale(sale?: Sale | null) {
 function Checkout({ draft, chargeSaleId, onClearDraft, session, sectionPage }: { draft: Appointment | null; chargeSaleId: string | null; onClearDraft: () => void; session: Session; sectionPage: string }) {
   const [section, setSection] = useState<CashSectionKey>(() => checkoutSectionFromPage(sectionPage));
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [saleModal, setSaleModal] = useState<{ sale?: Sale } | null>(null);
   const [loadedSale, setLoadedSale] = useState<Sale | null>(null);
   const [saleLoadError, setSaleLoadError] = useState("");
   const [closedReportSession, setClosedReportSession] = useState<CashSession | null>(null);
   const [closeConfirmationOpen, setCloseConfirmationOpen] = useState(false);
-  const search = query.trim();
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+  const search = debouncedQuery.trim();
   const { data: cashCurrent, error: cashCurrentError, loading: cashCurrentLoading, refresh: refreshCash } = useData<CashCurrent>("/cash/current");
   const cashSession = cashCurrent?.session ?? null;
   const cashStateReady = cashCurrent !== null;
@@ -2916,6 +2926,19 @@ function legacyMethodFromFinancial(type: FinancialPaymentMethod["type"]): PosPay
   return ({ CASH: "CASH", PIX: "PIX", DEBIT_CARD: "DEBIT", CREDIT_CARD: "CREDIT" } as Partial<Record<FinancialPaymentMethod["type"], PosPaymentMethod>>)[type] ?? "PIX";
 }
 
+function configuredCardBrands(method?: FinancialPaymentMethod) {
+  return method?.brands.map((brand) => brand.brandName) ?? [];
+}
+
+function fixedCardBrand(method?: FinancialPaymentMethod) {
+  const brands = configuredCardBrands(method);
+  return brands.length === 1 ? brands[0] : "";
+}
+
+function resolvedCardBrand(payment: Pick<PaymentForm, "cardBrand">, method?: FinancialPaymentMethod) {
+  return fixedCardBrand(method) || payment.cardBrand.trim();
+}
+
 function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments, onSelectCustomer, onClose, onConfirm }: { sale: Sale | null; customer: Customer | null; pet: Pet | null; total: number; paidBefore: number; existingPayments: { method: PaymentMethod; amount: number; cardBrand?: string; cardNsu?: string; cardAuthorization?: string; installments?: number | null }[]; onSelectCustomer: () => void; onClose: () => void; onConfirm: (payload: Record<string, unknown>) => Promise<void> }) {
   const { data: financialMethods } = useData<FinancialPaymentMethod[]>("/financial/payment-methods/active");
   const balance = Number(Math.max(0, total - paidBefore).toFixed(2));
@@ -2934,9 +2957,16 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
   useEffect(() => {
     if (!financialMethods?.length) return;
     setRows((current) => current.map((row) => {
-      if (row.financialPaymentMethodId) return row;
-      const configured = financialMethods.find((method) => legacyMethodFromFinancial(method.type) === row.method) ?? financialMethods[0];
-      return { ...row, financialPaymentMethodId: configured.id, method: legacyMethodFromFinancial(configured.type) };
+      const configured = row.financialPaymentMethodId
+        ? financialMethods.find((method) => method.id === row.financialPaymentMethodId)
+        : financialMethods.find((method) => legacyMethodFromFinancial(method.type) === row.method) ?? financialMethods[0];
+      if (!configured) return row;
+      return {
+        ...row,
+        financialPaymentMethodId: configured.id,
+        method: legacyMethodFromFinancial(configured.type),
+        cardBrand: fixedCardBrand(configured) || row.cardBrand
+      };
     }));
   }, [financialMethods]);
 
@@ -2965,16 +2995,18 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
   function addRow() {
     const openBalance = Math.max(0, balance - newPaid);
     const firstMethod = financialMethods?.[0];
-    setRows([...rows, { ...emptyPosPayment(openBalance), financialPaymentMethodId: firstMethod?.id, method: firstMethod ? legacyMethodFromFinancial(firstMethod.type) : "PIX" }]);
+    setRows([...rows, { ...emptyPosPayment(openBalance), financialPaymentMethodId: firstMethod?.id, method: firstMethod ? legacyMethodFromFinancial(firstMethod.type) : "PIX", cardBrand: fixedCardBrand(firstMethod) }]);
   }
 
   function paymentPayload() {
     return rows
-      .map((row) => ({
+      .map((row) => {
+        const configured = financialMethods?.find((method) => method.id === row.financialPaymentMethodId);
+        return {
         method: row.method,
         financialPaymentMethodId: row.financialPaymentMethodId,
         amount: decimalFromCents(row.amountCents),
-        cardBrand: row.method === "DEBIT" || row.method === "CREDIT" ? row.cardBrand.trim() : undefined,
+        cardBrand: row.method === "DEBIT" || row.method === "CREDIT" ? resolvedCardBrand(row, configured) : undefined,
         cardNsu: row.method === "PIX" || row.method === "DEBIT" || row.method === "CREDIT" ? row.cardNsu.trim() || undefined : undefined,
         pixReference: row.method === "PIX" ? row.cardNsu.trim() || undefined : undefined,
         cardAuthorization: row.method === "DEBIT" || row.method === "CREDIT" ? row.cardAuthorization.trim() || undefined : undefined,
@@ -2982,7 +3014,8 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
         cashReceived: row.method === "CASH" ? decimalFromCents(row.cashReceivedCents) : undefined,
         changeAmount: row.method === "CASH" ? Math.max(0, decimalFromCents(row.cashReceivedCents) - decimalFromCents(row.amountCents)) : undefined,
         anticipated: anticipationConfig(row).immediateCredit || Boolean(row.anticipate)
-      }))
+      };
+      })
       .filter((payment) => payment.amount > 0);
   }
 
@@ -2992,10 +3025,11 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
     if (!payments.length) nextErrors.form = "Adicione ao menos uma forma de pagamento.";
     rows.forEach((row, index) => {
       const amount = decimalFromCents(row.amountCents);
+      const configured = financialMethods?.find((method) => method.id === row.financialPaymentMethodId);
       if (!row.financialPaymentMethodId) nextErrors[`method-${index}`] = "Cadastre e selecione uma forma de pagamento.";
       if (amount <= 0) nextErrors[`amount-${index}`] = "Informe um valor maior que zero.";
       if (row.method === "CASH" && decimalFromCents(row.cashReceivedCents) < amount) nextErrors[`cash-${index}`] = "Valor entregue não pode ser menor que o valor usado.";
-      if ((row.method === "DEBIT" || row.method === "CREDIT") && !row.cardBrand.trim()) nextErrors[`brand-${index}`] = "Informe a bandeira.";
+      if ((row.method === "DEBIT" || row.method === "CREDIT") && !resolvedCardBrand(row, configured)) nextErrors[`brand-${index}`] = "Informe a bandeira.";
       if ((row.method === "DEBIT" || row.method === "CREDIT") && !row.cardNsu.trim()) nextErrors[`nsu-${index}`] = "Informe a NSU do cartão.";
       if (row.method === "CREDIT" && Number(row.installments || 0) <= 0) nextErrors[`installments-${index}`] = "Informe as parcelas.";
     });
@@ -3054,16 +3088,22 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
           const amount = decimalFromCents(row.amountCents);
           const cashReceived = decimalFromCents(row.cashReceivedCents);
           const change = row.method === "CASH" ? Math.max(0, cashReceived - amount) : 0;
+          const configuredMethod = financialMethods?.find((method) => method.id === row.financialPaymentMethodId);
+          const lockedBrand = fixedCardBrand(configuredMethod);
           return <div className="grid gap-3 rounded-lg border border-slate-200 p-3" key={index}>
             <div className="grid gap-3 md:grid-cols-[180px_150px_1fr_44px]">
               <select className="field" value={row.financialPaymentMethodId ?? `legacy:${row.method}`} onChange={(event) => {
                 const configured = financialMethods?.find((method) => method.id === event.target.value);
-                updateRow(index, configured ? { financialPaymentMethodId: configured.id, method: legacyMethodFromFinancial(configured.type), cardBrand: "", cardNsu: "", installments: "1" } : { financialPaymentMethodId: undefined, method: event.target.value.replace("legacy:", "") as PosPaymentMethod });
+                updateRow(index, configured ? { financialPaymentMethodId: configured.id, method: legacyMethodFromFinancial(configured.type), cardBrand: fixedCardBrand(configured), cardNsu: "", installments: "1" } : { financialPaymentMethodId: undefined, method: event.target.value.replace("legacy:", "") as PosPaymentMethod });
               }}>{financialMethods?.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}</select>
               <input className="field" placeholder="Valor" inputMode="numeric" value={formatCurrencyInput(row.amountCents)} onChange={(event) => updateRow(index, { amountCents: onlyDigits(event.target.value) })} />
               {row.method === "CASH" && <div className="grid gap-2 md:grid-cols-2"><input className="field" placeholder="Valor entregue" inputMode="numeric" value={formatCurrencyInput(row.cashReceivedCents)} onChange={(event) => updateRow(index, { cashReceivedCents: onlyDigits(event.target.value) })} /><p className="self-center text-sm font-medium">Troco: {currency(change)}</p></div>}
               {row.method === "PIX" && <input className="field" placeholder="Código do comprovante PIX" value={row.cardNsu} onChange={(event) => updateRow(index, { cardNsu: event.target.value })} />}
-              {(row.method === "DEBIT" || row.method === "CREDIT") && <div className="grid gap-2 md:grid-cols-3"><select className="field" value={row.cardBrand} onChange={(event) => updateRow(index, { cardBrand: event.target.value })}><option value="">Bandeira</option>{(financialMethods?.find((method) => method.id === row.financialPaymentMethodId)?.brands.map((brand) => brand.brandName) ?? cardBrands).map((brand) => <option key={brand} value={brand}>{brand}</option>)}</select>{row.method === "CREDIT" && <select className="field" value={row.installments} onChange={(event) => updateRow(index, { installments: event.target.value })}>{Array.from({ length: financialMethods?.find((method) => method.id === row.financialPaymentMethodId)?.maxInstallments ?? 12 }, (_, optionIndex) => optionIndex + 1).map((installment) => <option key={installment} value={installment}>{installment}x</option>)}</select>}<input className="field" placeholder="NSU" value={row.cardNsu} onChange={(event) => updateRow(index, { cardNsu: event.target.value })} /></div>}
+              {(row.method === "DEBIT" || row.method === "CREDIT") && <div className={`grid gap-2 ${row.method === "CREDIT" ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+                {lockedBrand ? <div className="field flex items-center bg-slate-50 text-sm text-slate-700">Bandeira: {lockedBrand}</div> : <select className="field" value={row.cardBrand} onChange={(event) => updateRow(index, { cardBrand: event.target.value })}><option value="">Bandeira</option>{(configuredCardBrands(configuredMethod).length ? configuredCardBrands(configuredMethod) : cardBrands).map((brand) => <option key={brand} value={brand}>{brand}</option>)}</select>}
+                {row.method === "CREDIT" && <select className="field" value={row.installments} onChange={(event) => updateRow(index, { installments: event.target.value })}>{Array.from({ length: configuredMethod?.maxInstallments ?? 12 }, (_, optionIndex) => optionIndex + 1).map((installment) => <option key={installment} value={installment}>{installment}x</option>)}</select>}
+                <input className="field" placeholder="NSU" value={row.cardNsu} onChange={(event) => updateRow(index, { cardNsu: event.target.value })} />
+              </div>}
               <button className="btn btn-secondary" type="button" disabled={rows.length === 1} onClick={() => removeRow(index)}><Trash2 size={16} /></button>
             </div>
             {anticipationConfig(row).allowed && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(row.anticipate)} onChange={(event) => updateRow(index, { anticipate: event.target.checked })} />Antecipar recebimento — taxa de {anticipationConfig(row).fee.toLocaleString("pt-BR")}%</label>}
@@ -3663,9 +3703,11 @@ function SaleReceiveModal({ sale, session, cashSession, onClose, onSaved }: { sa
     if (!financialMethods?.length) return;
     const methodMap: Record<FinancialPaymentMethod["type"], PaymentMethod> = { CASH: "CASH", PIX: "PIX", DEBIT_CARD: "DEBIT", CREDIT_CARD: "CREDIT", BANK_TRANSFER: "TRANSFER", OTHER: "OTHER" };
     setPaymentRows((current) => current.map((row) => {
-      if (row.financialPaymentMethodId) return row;
-      const configured = financialMethods.find((method) => methodMap[method.type] === row.method) ?? financialMethods[0];
-      return { ...row, financialPaymentMethodId: configured.id, method: methodMap[configured.type] };
+      const configured = row.financialPaymentMethodId
+        ? financialMethods.find((method) => method.id === row.financialPaymentMethodId)
+        : financialMethods.find((method) => methodMap[method.type] === row.method) ?? financialMethods[0];
+      if (!configured) return row;
+      return { ...row, financialPaymentMethodId: configured.id, method: methodMap[configured.type], cardBrand: fixedCardBrand(configured) || row.cardBrand };
     }));
   }, [financialMethods]);
 
@@ -3731,7 +3773,7 @@ function SaleReceiveModal({ sale, session, cashSession, onClose, onSaved }: { sa
   function addPaymentRow() {
     const configured = financialMethods?.[0];
     const methodMap: Record<FinancialPaymentMethod["type"], PaymentMethod> = { CASH: "CASH", PIX: "PIX", DEBIT_CARD: "DEBIT", CREDIT_CARD: "CREDIT", BANK_TRANSFER: "TRANSFER", OTHER: "OTHER" };
-    setPaymentRows([...paymentRows, { method: configured ? methodMap[configured.type] : "PIX", financialPaymentMethodId: configured?.id, amountCents: "", cardBrand: "", cardNsu: "", cardAuthorization: "", installments: "" }]);
+    setPaymentRows([...paymentRows, { method: configured ? methodMap[configured.type] : "PIX", financialPaymentMethodId: configured?.id, amountCents: "", cardBrand: fixedCardBrand(configured), cardNsu: "", cardAuthorization: "", installments: "" }]);
   }
 
   function removePaymentRow(index: number) {
@@ -3740,11 +3782,11 @@ function SaleReceiveModal({ sale, session, cashSession, onClose, onSaved }: { sa
 
   function normalizedPayments(status: "PAID" | "PARTIALLY_PAID" | "PENDING") {
     const payments = paymentRows
-      .map((payment) => ({ ...payment, amount: decimalFromCents(payment.amountCents) }))
+      .map((payment) => ({ ...payment, cardBrand: resolvedCardBrand(payment, financialMethods?.find((method) => method.id === payment.financialPaymentMethodId)), amount: decimalFromCents(payment.amountCents) }))
       .filter((payment) => payment.amount > 0);
     if (status === "PAID" && !payments.length) {
       const first = paymentRows[0] ?? { method: "PIX", amountCents: "", cardBrand: "", cardNsu: "", cardAuthorization: "", installments: "" };
-      return [{ ...first, amount: total }];
+      return [{ ...first, cardBrand: resolvedCardBrand(first, financialMethods?.find((method) => method.id === first.financialPaymentMethodId)), amount: total }];
     }
     return payments;
   }
@@ -3770,10 +3812,10 @@ function SaleReceiveModal({ sale, session, cashSession, onClose, onSaved }: { sa
     }
     const invalidCard = paymentRows.find((payment) =>
       (payment.method === "DEBIT" || payment.method === "CREDIT") &&
-      (!payment.cardBrand.trim() || !payment.cardNsu.trim() || (payment.method === "CREDIT" && Number(payment.installments || 0) < 1))
+      (!resolvedCardBrand(payment, financialMethods?.find((method) => method.id === payment.financialPaymentMethodId)) || !payment.cardNsu.trim() || (payment.method === "CREDIT" && Number(payment.installments || 0) < 1))
     );
     if (invalidCard) {
-      if (!invalidCard.cardBrand.trim()) setMessage("Selecione a bandeira do cartão.");
+      if (!resolvedCardBrand(invalidCard, financialMethods?.find((method) => method.id === invalidCard.financialPaymentMethodId))) setMessage("Selecione a bandeira do cartão.");
       else if (!invalidCard.cardNsu.trim()) setMessage("Informe a NSU do cartão para concluir o pagamento.");
       else setMessage("Selecione a quantidade de parcelas.");
       return;
@@ -3915,10 +3957,14 @@ function SaleReceiveModal({ sale, session, cashSession, onClose, onSaved }: { sa
           <select className="field" value={payment.financialPaymentMethodId ?? `legacy:${payment.method}`} onChange={(event) => {
             const configured = financialMethods?.find((method) => method.id === event.target.value);
             const methodMap: Record<FinancialPaymentMethod["type"], PaymentMethod> = { CASH: "CASH", PIX: "PIX", DEBIT_CARD: "DEBIT", CREDIT_CARD: "CREDIT", BANK_TRANSFER: "TRANSFER", OTHER: "OTHER" };
-            updatePaymentRow(index, configured ? { financialPaymentMethodId: configured.id, method: methodMap[configured.type], cardBrand: "", installments: "" } : { financialPaymentMethodId: undefined, method: event.target.value.replace("legacy:", "") as PaymentMethod });
+            updatePaymentRow(index, configured ? { financialPaymentMethodId: configured.id, method: methodMap[configured.type], cardBrand: fixedCardBrand(configured), installments: "" } : { financialPaymentMethodId: undefined, method: event.target.value.replace("legacy:", "") as PaymentMethod });
           }}>{financialMethods?.length ? financialMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>) : Object.entries(paymentMethodLabels).map(([value, label]) => <option key={value} value={`legacy:${value}`}>{label}</option>)}</select>
           <input className="field" placeholder="Valor" inputMode="numeric" value={formatCurrencyInput(payment.amountCents)} onChange={(event) => updatePaymentRow(index, { amountCents: onlyDigits(event.target.value) })} />
-          {(payment.method === "DEBIT" || payment.method === "CREDIT") ? <div className="grid gap-2 md:grid-cols-3"><input className="field" placeholder="Bandeira" value={payment.cardBrand} onChange={(event) => updatePaymentRow(index, { cardBrand: event.target.value })} /><input className="field" placeholder="NSU" value={payment.cardNsu} onChange={(event) => updatePaymentRow(index, { cardNsu: event.target.value })} /><input className="field" placeholder="Parcelas" inputMode="numeric" value={payment.installments} onChange={(event) => updatePaymentRow(index, { installments: onlyDigits(event.target.value, 2) })} /></div> : <p className="self-center text-xs text-slate-500">Use mais de uma linha para pagamento misto.</p>}
+          {(payment.method === "DEBIT" || payment.method === "CREDIT") ? <div className={`grid gap-2 ${payment.method === "CREDIT" ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+            {fixedCardBrand(financialMethods?.find((method) => method.id === payment.financialPaymentMethodId)) ? <div className="field flex items-center bg-slate-50 text-sm text-slate-700">Bandeira: {fixedCardBrand(financialMethods?.find((method) => method.id === payment.financialPaymentMethodId))}</div> : <input className="field" placeholder="Bandeira" value={payment.cardBrand} onChange={(event) => updatePaymentRow(index, { cardBrand: event.target.value })} />}
+            <input className="field" placeholder="NSU" value={payment.cardNsu} onChange={(event) => updatePaymentRow(index, { cardNsu: event.target.value })} />
+            {payment.method === "CREDIT" && <input className="field" placeholder="Parcelas" inputMode="numeric" value={payment.installments} onChange={(event) => updatePaymentRow(index, { installments: onlyDigits(event.target.value, 2) })} />}
+          </div> : <p className="self-center text-xs text-slate-500">Use mais de uma linha para pagamento misto.</p>}
           <button className="btn btn-secondary" type="button" disabled={paymentRows.length === 1} onClick={() => removePaymentRow(index)}><Trash2 size={16} /></button>
         </div>)}
         <div className="grid gap-2 rounded-md bg-slate-50 p-3 text-sm md:grid-cols-3"><p><b>Pago informado:</b> {currency(paidEntered)}</p><p><b>Saldo pendente:</b> {currency(pendingPreview)}</p><p><b>Forma principal:</b> {paymentMethodLabels[primaryPaymentMethod]}</p></div>
@@ -4325,10 +4371,10 @@ function PublicCustomerRegistration({ token }: { token: string }) {
   const [form, setForm] = useState({ name: "", cpf: "", phone: "", zipCode: "", street: "", number: "", complement: "", neighborhood: "", city: "", state: "", petName: "", species: "DOG", customSpecies: "", breed: "", petGender: "UNINFORMED", size: "SMALL", color: "", notes: "" });
   const [saving, setSaving] = useState(false); const [error, setError] = useState(""); const [done, setDone] = useState(false); const [lookingUpCep, setLookingUpCep] = useState(false);
   async function lookupCep() { const cep = onlyDigits(form.zipCode, 8); if (cep.length !== 8) return; setLookingUpCep(true); try { const response = await fetch(`https://viacep.com.br/ws/${cep}/json/`); const address = await response.json(); if (address.erro) throw new Error(); setForm((current) => ({ ...current, street: address.logradouro ?? "", neighborhood: address.bairro ?? "", city: address.localidade ?? "", state: address.uf ?? "" })); } catch { setError("CEP não encontrado. Preencha o endereço manualmente."); } finally { setLookingUpCep(false); } }
-  async function submit(event: React.FormEvent) { event.preventDefault(); setError(""); if (onlyDigits(form.cpf).length !== 11) return setError("Informe um CPF válido com 11 números."); setSaving(true); try { await api(`/public-registration/${token}`, { method: "POST", body: JSON.stringify({ ...form, cpf: onlyDigits(form.cpf, 11), phone: onlyDigits(form.phone, 11), zipCode: onlyDigits(form.zipCode, 8) }) }); setDone(true); } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível concluir o cadastro."); } finally { setSaving(false); } }
+  async function submit(event: React.FormEvent) { event.preventDefault(); setError(""); const cpf = onlyDigits(form.cpf, 11); if (cpf && cpf.length !== 11) return setError("Informe um CPF válido com 11 números ou deixe o campo em branco."); setSaving(true); try { await api(`/public-registration/${token}`, { method: "POST", body: JSON.stringify({ ...form, cpf: cpf || undefined, phone: onlyDigits(form.phone, 11), zipCode: onlyDigits(form.zipCode, 8) }) }); setDone(true); } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível concluir o cadastro."); } finally { setSaving(false); } }
   if (done) return <main className="grid min-h-screen place-items-center bg-slate-100 p-4"><section className="panel max-w-lg p-6 text-center sm:p-8"><div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-emerald-100 text-emerald-700"><Check size={30} /></div><h1 className="mt-4 text-2xl font-semibold">Cadastro concluído</h1><p className="mt-2 text-slate-600">Seus dados foram enviados com segurança para {data?.companyName ?? "a empresa"}.</p></section></main>;
   if (linkError) return <main className="grid min-h-screen place-items-center bg-slate-100 p-4"><section className="panel max-w-lg p-6 text-center"><h1 className="text-xl font-semibold">Link indisponível</h1><p className="mt-2 text-slate-600">{linkError}</p></section></main>;
-  return <main className="min-h-screen bg-slate-100 px-3 py-5 sm:px-6 sm:py-8"><form className="panel mx-auto grid max-w-3xl gap-6 overflow-hidden p-4 sm:p-7" onSubmit={submit}><header><p className="text-sm font-semibold text-blue-700">{data?.companyName ?? "Carregando empresa..."}</p><h1 className="mt-1 text-2xl font-semibold">Cadastro de cliente e pet</h1><p className="mt-2 text-sm text-slate-600">Preencha seus dados para agilizar o atendimento. Campos com * são obrigatórios.</p></header><section className="grid gap-3 sm:grid-cols-2"><h2 className="sm:col-span-2 font-semibold">Seus dados</h2><label className="text-sm font-medium">Nome completo *<input className="field mt-1" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label><label className="text-sm font-medium">CPF *<input className="field mt-1" required inputMode="numeric" value={formatCpf(form.cpf)} onChange={(e) => setForm({ ...form, cpf: onlyDigits(e.target.value, 11) })} /></label><label className="text-sm font-medium sm:col-span-2">Celular / WhatsApp *<input className="field mt-1" required inputMode="tel" value={formatPhone(form.phone)} onChange={(e) => setForm({ ...form, phone: onlyDigits(e.target.value, 11) })} /></label></section><section className="grid gap-3 sm:grid-cols-2"><h2 className="sm:col-span-2 font-semibold">Endereço</h2><label className="text-sm font-medium">CEP<input className="field mt-1" inputMode="numeric" value={formatCep(form.zipCode)} onBlur={lookupCep} onChange={(e) => setForm({ ...form, zipCode: onlyDigits(e.target.value, 8) })} /></label><label className="text-sm font-medium">Rua<input className="field mt-1" value={form.street} onChange={(e) => setForm({ ...form, street: e.target.value })} /></label><label className="text-sm font-medium">Número<input className="field mt-1" value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} /></label><label className="text-sm font-medium">Complemento<input className="field mt-1" value={form.complement} onChange={(e) => setForm({ ...form, complement: e.target.value })} /></label><label className="text-sm font-medium">Bairro<input className="field mt-1" value={form.neighborhood} onChange={(e) => setForm({ ...form, neighborhood: e.target.value })} /></label><label className="text-sm font-medium">Cidade<input className="field mt-1" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /></label><label className="text-sm font-medium">Estado<input className="field mt-1" value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} /></label>{lookingUpCep && <p className="self-end text-sm text-blue-700">Consultando CEP...</p>}</section><section className="grid gap-3 sm:grid-cols-2"><h2 className="sm:col-span-2 font-semibold">Dados do pet</h2><label className="text-sm font-medium">Nome do pet *<input className="field mt-1" required value={form.petName} onChange={(e) => setForm({ ...form, petName: e.target.value })} /></label><label className="text-sm font-medium">Espécie *<select className="field mt-1" value={form.species} onChange={(e) => setForm({ ...form, species: e.target.value })}><option value="DOG">Cão</option><option value="CAT">Gato</option><option value="OTHER">Outro</option></select></label>{form.species === "OTHER" && <label className="text-sm font-medium">Qual espécie? *<input className="field mt-1" required value={form.customSpecies} onChange={(e) => setForm({ ...form, customSpecies: e.target.value })} /></label>}<label className="text-sm font-medium">Raça<input className="field mt-1" value={form.breed} onChange={(e) => setForm({ ...form, breed: e.target.value })} /></label><label className="text-sm font-medium">Sexo<select className="field mt-1" value={form.petGender} onChange={(e) => setForm({ ...form, petGender: e.target.value })}><option value="UNINFORMED">Não informado</option><option value="MALE">Macho</option><option value="FEMALE">Fêmea</option></select></label><label className="text-sm font-medium">Porte<select className="field mt-1" value={form.size} onChange={(e) => setForm({ ...form, size: e.target.value })}><option value="SMALL">Pequeno</option><option value="MEDIUM">Médio</option><option value="LARGE">Grande</option><option value="GIANT">Gigante</option></select></label><label className="text-sm font-medium">Cor<input className="field mt-1" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} /></label><label className="text-sm font-medium sm:col-span-2">Observações importantes<textarea className="field mt-1" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label></section>{error && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}<button className="btn btn-primary w-full sm:justify-self-end sm:w-auto" disabled={saving || !data}>{saving ? "Enviando..." : "Concluir cadastro"}</button></form></main>;
+  return <main className="min-h-screen bg-slate-100 px-3 py-5 sm:px-6 sm:py-8"><form className="panel mx-auto grid max-w-3xl gap-6 overflow-hidden p-4 sm:p-7" onSubmit={submit}><header><p className="text-sm font-semibold text-blue-700">{data?.companyName ?? "Carregando empresa..."}</p><h1 className="mt-1 text-2xl font-semibold">Cadastro de cliente e pet</h1><p className="mt-2 text-sm text-slate-600">Preencha seus dados para agilizar o atendimento. Campos com * são obrigatórios.</p></header><section className="grid gap-3 sm:grid-cols-2"><h2 className="sm:col-span-2 font-semibold">Seus dados</h2><label className="text-sm font-medium">Nome completo *<input className="field mt-1" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label><label className="text-sm font-medium">CPF (opcional)<input className="field mt-1" inputMode="numeric" value={formatCpf(form.cpf)} onChange={(e) => setForm({ ...form, cpf: onlyDigits(e.target.value, 11) })} /></label><label className="text-sm font-medium sm:col-span-2">Celular / WhatsApp *<input className="field mt-1" required inputMode="tel" value={formatPhone(form.phone)} onChange={(e) => setForm({ ...form, phone: onlyDigits(e.target.value, 11) })} /></label></section><section className="grid gap-3 sm:grid-cols-2"><h2 className="sm:col-span-2 font-semibold">Endereço</h2><label className="text-sm font-medium">CEP<input className="field mt-1" inputMode="numeric" value={formatCep(form.zipCode)} onBlur={lookupCep} onChange={(e) => setForm({ ...form, zipCode: onlyDigits(e.target.value, 8) })} /></label><label className="text-sm font-medium">Rua<input className="field mt-1" value={form.street} onChange={(e) => setForm({ ...form, street: e.target.value })} /></label><label className="text-sm font-medium">Número<input className="field mt-1" value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} /></label><label className="text-sm font-medium">Complemento<input className="field mt-1" value={form.complement} onChange={(e) => setForm({ ...form, complement: e.target.value })} /></label><label className="text-sm font-medium">Bairro<input className="field mt-1" value={form.neighborhood} onChange={(e) => setForm({ ...form, neighborhood: e.target.value })} /></label><label className="text-sm font-medium">Cidade<input className="field mt-1" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /></label><label className="text-sm font-medium">Estado<input className="field mt-1" value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} /></label>{lookingUpCep && <p className="self-end text-sm text-blue-700">Consultando CEP...</p>}</section><section className="grid gap-3 sm:grid-cols-2"><h2 className="sm:col-span-2 font-semibold">Dados do pet</h2><label className="text-sm font-medium">Nome do pet *<input className="field mt-1" required value={form.petName} onChange={(e) => setForm({ ...form, petName: e.target.value })} /></label><label className="text-sm font-medium">Espécie *<select className="field mt-1" value={form.species} onChange={(e) => setForm({ ...form, species: e.target.value })}><option value="DOG">Cão</option><option value="CAT">Gato</option><option value="OTHER">Outro</option></select></label>{form.species === "OTHER" && <label className="text-sm font-medium">Qual espécie? *<input className="field mt-1" required value={form.customSpecies} onChange={(e) => setForm({ ...form, customSpecies: e.target.value })} /></label>}<label className="text-sm font-medium">Raça<input className="field mt-1" value={form.breed} onChange={(e) => setForm({ ...form, breed: e.target.value })} /></label><label className="text-sm font-medium">Sexo<select className="field mt-1" value={form.petGender} onChange={(e) => setForm({ ...form, petGender: e.target.value })}><option value="UNINFORMED">Não informado</option><option value="MALE">Macho</option><option value="FEMALE">Fêmea</option></select></label><label className="text-sm font-medium">Porte<select className="field mt-1" value={form.size} onChange={(e) => setForm({ ...form, size: e.target.value })}><option value="SMALL">Pequeno</option><option value="MEDIUM">Médio</option><option value="LARGE">Grande</option><option value="GIANT">Gigante</option></select></label><label className="text-sm font-medium">Cor<input className="field mt-1" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} /></label><label className="text-sm font-medium sm:col-span-2">Observações importantes<textarea className="field mt-1" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label></section>{error && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}<button className="btn btn-primary w-full sm:justify-self-end sm:w-auto" disabled={saving || !data}>{saving ? "Enviando..." : "Concluir cadastro"}</button></form></main>;
 }
 
 function GlobalLoadingIndicator() {

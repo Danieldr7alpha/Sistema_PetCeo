@@ -15,7 +15,7 @@ import { financialRouter } from "./routes/financial.js";
 import { managementRouter } from "./routes/management.js";
 import { publicRegistrationRouter } from "./routes/public-registration.js";
 import { notificationsRouter } from "./routes/notifications.js";
-import { prisma, runWithPrismaScope } from "./lib/prisma.js";
+import { prisma } from "./lib/prisma.js";
 
 export const app = express();
 const allowedOrigins = new Set(
@@ -37,14 +37,6 @@ app.use(
   })
 );
 app.use(express.json());
-app.use((_req, res, next) => {
-  runWithPrismaScope((client) => {
-    res.once("finish", () => {
-      void client.$disconnect();
-    });
-    next();
-  });
-});
 
 app.get("/health", async (_req, res) => {
   try {

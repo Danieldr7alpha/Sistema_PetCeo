@@ -361,7 +361,7 @@ model Customer {
   companyId    String
   name         String
   internalCode Int?
-  cpf          String
+  cpf          String?
   gender       Gender               @default(UNINFORMED)
   customGender String?
   phone        String

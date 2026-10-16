@@ -8,6 +8,8 @@ import { saleItemSchema, type SaleItemInput } from "../schemas/sale.js";
 
 export const salesRouter = Router();
 const checkoutInProgress = new Set<string>();
+const legacyReceivableRepairs = new Map<string, Promise<void>>();
+const finishedAppointmentSaleRepairs = new Map<string, Promise<void>>();
 
 const paymentMethods = ["PIX", "CASH", "DEBIT", "CREDIT", "TRANSFER", "VOUCHER", "OTHER"] as const;
 const saleStatuses = ["WAITING_PAYMENT", "PARTIALLY_PAID", "PENDING", "PAID", "CANCELLED", "REFUNDED"] as const;
@@ -15,16 +17,32 @@ const pendingReasons = ["PIX_LATER", "PAY_ON_PICKUP", "OWED", "CARD_PROBLEM", "P
 const receivableStatuses = ["WAITING_PAYMENT", "PENDING", "PARTIALLY_PAID"] as const;
 
 async function repairLegacyReceivableBalances(cid: string) {
-  // Older agenda orders were created with pendingAmount = 0 even though no
-  // payment had been received. Keep those orders visible and collectible.
-  await prisma.$executeRaw`
-    UPDATE "Sale"
-       SET "pendingAmount" = GREATEST("total" - "paidAmount", 0)
-     WHERE "companyId" = ${cid}
-       AND status IN ('WAITING_PAYMENT', 'PENDING', 'PARTIALLY_PAID')
-       AND "pendingAmount" <= 0
-       AND "total" > "paidAmount"
-  `;
+  // New orders already have the correct balance. This is only a recovery for
+  // legacy rows and must not run every time the operator searches an order.
+  await runCompanyRepair(legacyReceivableRepairs, cid, async () => {
+    await prisma.$executeRaw`
+      UPDATE "Sale"
+         SET "pendingAmount" = GREATEST("total" - "paidAmount", 0)
+       WHERE "companyId" = ${cid}
+         AND status IN ('WAITING_PAYMENT', 'PENDING', 'PARTIALLY_PAID')
+         AND "pendingAmount" <= 0
+         AND "total" > "paidAmount"
+    `;
+  });
+}
+
+async function runCompanyRepair(repairs: Map<string, Promise<void>>, cid: string, task: () => Promise<void>) {
+  let repair = repairs.get(cid);
+  if (!repair) {
+    repair = task();
+    repairs.set(cid, repair);
+  }
+  try {
+    await repair;
+  } catch (error) {
+    repairs.delete(cid);
+    throw error;
+  }
 }
 
 const salePaymentSchema = z.object({
@@ -616,22 +634,27 @@ export async function ensureWaitingSaleForFinishedAppointment(cid: string, appoi
 }
 
 async function ensureWaitingSalesForFinishedAppointments(cid: string) {
-  const appointments = await prisma.appointment.findMany({
-    where: {
-      companyId: cid,
-      status: "FINISHED",
-      OR: [
-        { sales: { none: {} } },
-        { paymentMode: "PACKAGE", sales: { some: { status: { in: ["WAITING_PAYMENT", "PENDING"] }, total: { lte: 0 } } } }
-      ]
-    },
-    include: { customer: true, pet: true, service: true },
-    orderBy: [{ date: "asc" }, { startTime: "asc" }]
-  });
+  // Finishing an appointment now creates its order immediately. Keep this as
+  // a one-time recovery for older records, instead of scanning the agenda on
+  // every cash-screen refresh.
+  await runCompanyRepair(finishedAppointmentSaleRepairs, cid, async () => {
+    const appointments = await prisma.appointment.findMany({
+      where: {
+        companyId: cid,
+        status: "FINISHED",
+        OR: [
+          { sales: { none: {} } },
+          { paymentMode: "PACKAGE", sales: { some: { status: { in: ["WAITING_PAYMENT", "PENDING"] }, total: { lte: 0 } } } }
+        ]
+      },
+      select: { id: true },
+      orderBy: [{ date: "asc" }, { startTime: "asc" }]
+    });
 
-  for (const appointment of appointments) {
-    await ensureWaitingSaleForFinishedAppointment(cid, appointment.id);
-  }
+    for (const appointment of appointments) {
+      await ensureWaitingSaleForFinishedAppointment(cid, appointment.id);
+    }
+  });
 }
 
 async function validateCustomerPet(cid: string, customerId?: string, petId?: string) {
@@ -676,12 +699,28 @@ async function buildSaleItems(cid: string, rawItems: SaleItemInput[], coveredSer
   });
 }
 
+function currencyToCents(value: number) {
+  return Math.round((value + Number.EPSILON) * 100);
+}
+
+function centsToCurrency(value: number) {
+  return value / 100;
+}
+
 function calculateTotals(items: { total: number }[], discountType: "VALUE" | "PERCENT", discountInput: number) {
-  const subtotal = items.reduce((sum, item) => sum + item.total, 0);
-  const rawDiscount = discountType === "PERCENT" ? subtotal * Math.min(discountInput, 100) / 100 : discountInput;
-  const discount = Math.min(subtotal, Math.max(0, rawDiscount));
-  const discountPercent = subtotal > 0 ? Number(((discount / subtotal) * 100).toFixed(2)) : 0;
-  return { subtotal, discount, discountPercent, total: Math.max(0, subtotal - discount) };
+  // Monetary values must be compared in cents. Adding decimal JavaScript
+  // numbers directly can turn an exact payment (for example R$ 120 + R$ 50)
+  // into a tiny amount above the total.
+  const subtotalCents = items.reduce((sum, item) => sum + currencyToCents(item.total), 0);
+  const requestedDiscountCents = discountType === "PERCENT"
+    ? Math.round(subtotalCents * Math.min(discountInput, 100) / 100)
+    : currencyToCents(discountInput);
+  const discountCents = Math.min(subtotalCents, Math.max(0, requestedDiscountCents));
+  const totalCents = Math.max(0, subtotalCents - discountCents);
+  const subtotal = centsToCurrency(subtotalCents);
+  const discount = centsToCurrency(discountCents);
+  const discountPercent = subtotalCents > 0 ? Number(((discountCents / subtotalCents) * 100).toFixed(2)) : 0;
+  return { subtotal, discount, discountPercent, total: centsToCurrency(totalCents) };
 }
 
 function requiresDiscountApproval(_discountPercent: number) {
@@ -749,6 +788,12 @@ async function buildPaymentPlan(
     if (configured && typeToLegacy[configured.type] !== payment.method) {
       throw Object.assign(new Error("O tipo da forma de recebimento não corresponde ao pagamento informado."), { statusCode: 400 });
     }
+    // A form with exactly one configured card brand already identifies the
+    // brand (for example, "Mastercard Crédito"). Keep older clients working
+    // by completing that value on the server too.
+    if ((payment.method === "DEBIT" || payment.method === "CREDIT") && !payment.cardBrand?.trim() && configured?.brands.length === 1) {
+      payment.cardBrand = configured.brands[0].brandName;
+    }
     if ((payment.method === "DEBIT" || payment.method === "CREDIT") && !payment.cardBrand?.trim()) {
       throw Object.assign(new Error("Informe a bandeira do cartão."), { statusCode: 400 });
     }
@@ -766,12 +811,14 @@ async function buildPaymentPlan(
       paymentReferences.add(reference);
     }
   }
-  const paidAmount = Number(requestedPayments.reduce((sum, payment) => sum + payment.amount, 0).toFixed(2));
-  if (paidAmount - total > 0.01) {
+  const totalCents = currencyToCents(total);
+  const paidCents = requestedPayments.reduce((sum, payment) => sum + currencyToCents(payment.amount), 0);
+  if (paidCents > totalCents) {
     throw Object.assign(new Error("Valor pago nÃ£o pode ser maior que o total da venda."), { statusCode: 400 });
   }
-  const pendingAmount = Number(Math.max(0, total - paidAmount).toFixed(2));
-  const status = pendingAmount <= 0.01 ? "PAID" : paidAmount > 0 ? "PARTIALLY_PAID" : "PENDING";
+  const paidAmount = centsToCurrency(paidCents);
+  const pendingAmount = centsToCurrency(Math.max(0, totalCents - paidCents));
+  const status = pendingAmount === 0 ? "PAID" : paidAmount > 0 ? "PARTIALLY_PAID" : "PENDING";
   if (body.status === "PAID" && status !== "PAID") {
     throw Object.assign(new Error("Pagamento pago precisa cobrir o total da venda."), { statusCode: 400 });
   }
