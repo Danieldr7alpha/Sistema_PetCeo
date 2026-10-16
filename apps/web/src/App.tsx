@@ -370,14 +370,18 @@ function periodTitle(view: "day" | "week" | "month", value: string) {
 
 function appointmentBadge(appointment: Appointment) {
   if (appointment.paymentStatus === "PAID") return "Pago";
+  if (appointment.status === "FINISHED" && appointment.paymentStatus === "PENDING") return "A pagar";
+  if (appointment.paymentStatus === "NOT_REQUIRED") return "Coberto";
   const membership = appointment.customer.memberships?.find((item) => item.pet.id === appointment.pet.id && item.status === "ACTIVE");
   return membership ? "Mensalista" : "Avulso";
 }
 
-function appointmentColor(status: string) {
+function appointmentColor(appointment: Appointment) {
+  const { status, paymentStatus } = appointment;
   if (status === "ARRIVED") return { dot: "bg-orange-500", card: "border-orange-300 border-l-4 border-l-orange-500 bg-orange-50" };
   if (status === "IN_SERVICE" || status === "BATHING") return { dot: "bg-violet-600", card: "border-violet-300 border-l-4 border-l-violet-600 bg-violet-50" };
   if (status === "WAITING_PICKUP") return { dot: "bg-cyan-600", card: "border-cyan-300 border-l-4 border-l-cyan-600 bg-cyan-50" };
+  if (status === "FINISHED" && paymentStatus === "PENDING") return { dot: "bg-amber-600", card: "border-amber-300 border-l-4 border-l-amber-600 bg-amber-50" };
   if (status === "FINISHED") return { dot: "bg-emerald-600", card: "border-emerald-300 border-l-4 border-l-emerald-600 bg-emerald-50" };
   if (status === "CANCELLED") return { dot: "bg-red-600", card: "border-red-300 border-l-4 border-l-red-600 bg-red-50" };
   return { dot: "bg-blue-600", card: "border-blue-300 border-l-4 border-l-blue-600 bg-blue-50" };
@@ -1309,7 +1313,7 @@ function Appointments({ onCharge, onRenewMembership }: { onCharge: (appointment:
     };
   }
   function appointmentCard(appointment: Appointment, compact = false) {
-    const color = appointmentColor(appointment.status);
+    const color = appointmentColor(appointment);
     const renewalReminder = appointment.membershipRenewal?.status === "PENDING_PAYMENT";
     const membership = appointment.membership;
     const usage = appointment.membershipUsage;
