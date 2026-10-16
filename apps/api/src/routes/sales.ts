@@ -80,6 +80,18 @@ const checkoutSchema = z.object({
   items: z.array(saleItemSchema).min(1)
 });
 
+type CheckoutItemData = {
+  companyId: string;
+  itemType: "SERVICE" | "PRODUCT";
+  serviceId?: string;
+  productId?: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+  coveredByMembership?: boolean;
+};
+
 function onlyDigits(value: string) {
   return value.replace(/\D/g, "");
 }
@@ -894,10 +906,7 @@ async function buildPaymentPlan(
   };
 }
 
-async function processStockOnce(cid: string, saleId: string, items: { productId?: string; quantity: number }[], db: any = prisma) {
-  const sale = await db.sale.findFirst({ where: { id: saleId, companyId: cid }, select: { stockProcessedAt: true } });
-  if (!sale || sale.stockProcessedAt) return;
-
+async function decreaseProductStock(cid: string, items: { productId?: string; quantity: number }[], db: any = prisma) {
   const productQuantityById = new Map<string, number>();
   for (const item of items) {
     if (!item.productId) continue;
@@ -917,6 +926,13 @@ async function processStockOnce(cid: string, saleId: string, items: { productId?
       await db.product.updateMany({ where: { id: productId, companyId: cid }, data: { stock: { decrement: quantity } } });
     }
   }
+}
+
+async function processStockOnce(cid: string, saleId: string, items: { productId?: string; quantity: number }[], db: any = prisma) {
+  const sale = await db.sale.findFirst({ where: { id: saleId, companyId: cid }, select: { stockProcessedAt: true } });
+  if (!sale || sale.stockProcessedAt) return;
+
+  await decreaseProductStock(cid, items, db);
 
   await db.sale.update({ where: { id: saleId }, data: { stockProcessedAt: new Date() } });
 }
@@ -1358,7 +1374,8 @@ salesRouter.patch("/:id/checkout", async (req, res) => {
       return res.status(400).json({ message: "Para registrar pagamento para depois, vincule um cliente cadastrado ao pedido." });
     }
 
-    let itemData;
+    let itemData: CheckoutItemData[];
+    let itemsAddedAfterStock: CheckoutItemData[] = [];
     if (lockedAppointmentSale) {
       const fixedCount = sale.items.length;
       const fixedItems = sale.items.slice(0, fixedCount).map((item) => ({
@@ -1374,10 +1391,26 @@ salesRouter.patch("/:id/checkout", async (req, res) => {
       }));
       const extras = body.items.slice(fixedCount);
       itemData = [...fixedItems, ...(extras.length ? await buildSaleItems(cid, extras) : [])];
+    } else if (sale.stockProcessedAt) {
+      // A waiting order may already have reserved its original items. Keep
+      // those rows untouched, but allow the operator to add a new service or
+      // product before receiving payment (for example, a package + a tosa).
+      const fixedItems = sale.items.map((item) => ({
+        companyId: cid,
+        itemType: item.itemType,
+        serviceId: item.serviceId ?? undefined,
+        productId: item.productId ?? undefined,
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: Number(item.unitPrice),
+        total: Number(item.total),
+        coveredByMembership: item.coveredByMembership
+      }));
+      const extras = body.items.slice(fixedItems.length);
+      itemsAddedAfterStock = extras.length ? await buildSaleItems(cid, extras) : [];
+      itemData = [...fixedItems, ...itemsAddedAfterStock];
     } else {
-      itemData = sale.stockProcessedAt
-        ? sale.items.map((item) => ({ companyId: cid, itemType: item.itemType, serviceId: item.serviceId ?? undefined, productId: item.productId ?? undefined, description: item.description, quantity: item.quantity, unitPrice: Number(item.unitPrice), total: Number(item.total), coveredByMembership: item.coveredByMembership }))
-        : await buildSaleItems(cid, body.items);
+      itemData = await buildSaleItems(cid, body.items);
     }
     const totals = calculateTotals(itemData, body.discountType, body.discount);
     if (!sale.stockProcessedAt && requiresDiscountApproval(totals.discountPercent) && !(await validateAdminPassword(cid, body.adminPassword))) {
@@ -1414,6 +1447,8 @@ salesRouter.patch("/:id/checkout", async (req, res) => {
       if (!sale.stockProcessedAt || lockedAppointmentSale) {
         await tx.saleItem.deleteMany({ where: { saleId: sale.id, companyId: cid } });
         await tx.saleItem.createMany({ data: itemData.map((item) => ({ ...item, saleId: sale.id })) });
+      } else if (itemsAddedAfterStock.length) {
+        await tx.saleItem.createMany({ data: itemsAddedAfterStock.map((item) => ({ ...item, saleId: sale.id })) });
       }
       markStep("items");
 
@@ -1457,7 +1492,11 @@ salesRouter.patch("/:id/checkout", async (req, res) => {
       });
       markStep("sale-and-payments");
 
-      await processStockOnce(cid, transactionSale.id, itemData, tx);
+      if (sale.stockProcessedAt) {
+        await decreaseProductStock(cid, itemsAddedAfterStock, tx);
+      } else {
+        await processStockOnce(cid, transactionSale.id, itemData, tx);
+      }
       if (!transactionSale.appointmentId) {
         await processMembershipUseOnce(cid, transactionSale.id, body.membershipId, tx);
       }
