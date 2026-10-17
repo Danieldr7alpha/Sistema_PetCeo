@@ -157,9 +157,9 @@ financialRouter.get("/overview", async (req, res) => {
     }),
     prisma.salePayment.aggregate({ where: { companyId: cid }, _sum: { feeAmount: true } })
   ]);
-  const receivable = Number(futureInstallments._sum.netAmount ?? 0) + Number(legacyFuturePayments._sum.netAmount ?? 0) + Number(pendingSales._sum.pendingAmount ?? 0);
+  const receivable = Number(futureInstallments._sum.netAmount ?? 0) + Number(legacyFuturePayments._sum.netAmount ?? 0);
   const payable = await prisma.financialPayable.aggregate({ where: { companyId: cid, status: "OPEN" }, _sum: { amount: true } });
-  res.json({ payable: Number(payable._sum.amount ?? 0), receivable, fees: Number(fees._sum.feeAmount ?? 0) });
+  res.json({ payable: Number(payable._sum.amount ?? 0), receivable, pendingOrders: Number(pendingSales._sum.pendingAmount ?? 0), fees: Number(fees._sum.feeAmount ?? 0) });
 });
 
 financialRouter.get("/overview/history", async (req, res) => {
@@ -221,7 +221,7 @@ financialRouter.get("/overview/history", async (req, res) => {
   }
 
   if (kind === "receivable") {
-    const [installments, legacyPayments, pendingSales] = await Promise.all([
+    const [installments, legacyPayments] = await Promise.all([
       prisma.salePaymentInstallment.findMany({
         where: { expectedSettlementDate: { gt: now }, salePayment: { companyId: cid } },
         select: { id: true, expectedSettlementDate: true, installmentNumber: true, netAmount: true, grossAmount: true, feeAmount: true, salePayment: { select: { installments: true, paymentMethodNameSnapshot: true, method: true, destinationAccount: { select: { name: true } }, sale: { select: { internalCode: true, customer: { select: { name: true } } } } } } }
@@ -229,26 +229,37 @@ financialRouter.get("/overview/history", async (req, res) => {
       prisma.salePayment.findMany({
         where: { companyId: cid, expectedSettlementDate: { gt: now }, settlementInstallments: { none: {} } },
         select: { id: true, expectedSettlementDate: true, netAmount: true, grossAmount: true, feeAmount: true, paymentMethodNameSnapshot: true, method: true, destinationAccount: { select: { name: true } }, sale: { select: { internalCode: true, customer: { select: { name: true } } } } }
-      }),
-      prisma.sale.findMany({
-        where: { companyId: cid, status: { in: ["PENDING", "PARTIALLY_PAID"] } },
-        select: { id: true, internalCode: true, pendingAmount: true, expectedPaymentDate: true, pendingReason: true, customer: { select: { name: true } } }
       })
     ]);
     const scheduled = [
       ...installments.map((item) => ({ id: `installment-${item.id}`, date: item.expectedSettlementDate, direction: "IN", amount: number(item.netAmount), grossAmount: number(item.grossAmount), feeAmount: number(item.feeAmount), description: `${item.salePayment.paymentMethodNameSnapshot ?? item.salePayment.method} · Venda ${item.salePayment.sale.internalCode ?? "-"} · Parcela ${item.installmentNumber}/${item.salePayment.installments ?? 1}`, detail: `${item.salePayment.sale.customer?.name ?? "Cliente não informado"} · Previsão no banco: ${item.salePayment.destinationAccount?.name ?? "Não informado"}` })),
       ...legacyPayments.map((item) => ({ id: `payment-${item.id}`, date: item.expectedSettlementDate!, direction: "IN", amount: number(item.netAmount), grossAmount: number(item.grossAmount), feeAmount: number(item.feeAmount), description: `${item.paymentMethodNameSnapshot ?? item.method} · Venda ${item.sale.internalCode ?? "-"}`, detail: `${item.sale.customer?.name ?? "Cliente não informado"} · Previsão no banco: ${item.destinationAccount?.name ?? "Não informado"}` }))
     ];
-    const pending = pendingSales.map((item) => ({ id: `sale-${item.id}`, date: item.expectedPaymentDate ?? now, direction: "IN", amount: number(item.pendingAmount), description: `Venda pendente ${item.internalCode ?? "-"}`, detail: `${item.customer?.name ?? "Cliente não informado"}${item.pendingReason ? ` · ${item.pendingReason}` : ""}` }));
     const scheduledTotal = scheduled.reduce((sum, item) => sum + item.amount, 0);
-    const pendingTotal = pending.reduce((sum, item) => sum + item.amount, 0);
     return res.json({
-      title: "Histórico — A receber",
-      description: "O total soma as parcelas que ainda entrarão no banco e as vendas que o cliente ainda precisa pagar.",
-      total: scheduledTotal + pendingTotal,
-      calculation: [{ label: "Recebimentos futuros", value: scheduledTotal }, { label: "Vendas pendentes", value: pendingTotal }],
-      items: [...scheduled, ...pending].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
-      emptyMessage: "Não há recebimentos futuros nem vendas pendentes."
+      title: "Histórico — Recebimentos previstos",
+      description: "São vendas já pagas pelo cliente, mas cujo valor líquido ainda tem previsão de entrar no banco.",
+      total: scheduledTotal,
+      calculation: [{ label: "Recebimentos previstos", value: scheduledTotal }],
+      items: scheduled.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
+      emptyMessage: "Não há recebimentos previstos para entrar no banco."
+    });
+  }
+
+  if (kind === "pending") {
+    const pendingSales = await prisma.sale.findMany({
+      where: { companyId: cid, status: { in: ["PENDING", "PARTIALLY_PAID"] } },
+      select: { id: true, internalCode: true, pendingAmount: true, expectedPaymentDate: true, pendingReason: true, customer: { select: { name: true } } }
+    });
+    const items = pendingSales.map((item) => ({ id: `sale-${item.id}`, date: item.expectedPaymentDate ?? now, direction: "IN", amount: number(item.pendingAmount), description: `Pedido pendente ${item.internalCode ?? "-"}`, detail: `${item.customer?.name ?? "Cliente não informado"}${item.pendingReason ? ` · ${item.pendingReason}` : ""}` }));
+    const total = items.reduce((sum, item) => sum + item.amount, 0);
+    return res.json({
+      title: "Histórico — Pedidos pendentes",
+      description: "São valores que ainda não foram pagos pelo cliente e precisam ser cobrados.",
+      total,
+      calculation: [{ label: "Pedidos não pagos", value: total }],
+      items: items.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
+      emptyMessage: "Não há pedidos pendentes de pagamento."
     });
   }
 
