@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
+import bcrypt from "bcryptjs";
 import { companyId, requirePermission } from "../middleware/auth.js";
 import { prisma } from "../lib/prisma.js";
 
@@ -81,6 +82,16 @@ const payableSchema = z.object({
   indefinite: z.boolean().default(false),
   notes: z.string().trim().optional()
 });
+
+async function approvedByOwner(req: Parameters<typeof companyId>[0], cid: string, adminEmail?: string, adminPassword?: string) {
+  if (req.user?.role === "ADMIN") return true;
+  if (!adminEmail || !adminPassword) return false;
+  const owner = await prisma.user.findFirst({
+    where: { companyId: cid, email: adminEmail.trim().toLowerCase(), role: "ADMIN", active: true },
+    select: { passwordHash: true }
+  });
+  return Boolean(owner && await bcrypt.compare(adminPassword, owner.passwordHash));
+}
 
 function payableDate(value: string) {
   return new Date(`${value}T12:00:00-03:00`);
@@ -400,6 +411,23 @@ financialRouter.post("/payables/:id/pay", async (req, res) => {
     paidFromAccountId: account.id, paymentMethod: body.paymentMethod, receiptFileName: body.receiptFileName || null,
     receiptMimeType: body.receiptMimeType || null, receiptData: body.receiptData || null, updatedById: req.user?.userId
   } }));
+});
+
+financialRouter.patch("/payables/:id/payment-account", async (req, res) => {
+  const cid = companyId(req);
+  const body = z.object({
+    paidFromAccountId: z.string().min(1),
+    adminEmail: z.string().trim().email().optional(),
+    adminPassword: z.string().min(1).optional()
+  }).parse(req.body);
+  const existing = await prisma.financialPayable.findFirst({ where: { id: req.params.id, companyId: cid, status: "PAID" } });
+  if (!existing) return res.status(404).json({ message: "Conta paga não encontrada." });
+  if (!(await approvedByOwner(req, cid, body.adminEmail, body.adminPassword))) {
+    return res.status(403).json({ message: "Para corrigir um pagamento já realizado, informe o e-mail e a senha de um administrador." });
+  }
+  const account = await prisma.financialAccount.findFirst({ where: { id: body.paidFromAccountId, companyId: cid, active: true } });
+  if (!account) return res.status(400).json({ message: "Selecione uma conta ativa para registrar a correção." });
+  res.json(await prisma.financialPayable.update({ where: { id: existing.id }, data: { paidFromAccountId: account.id, updatedById: req.user?.userId } }));
 });
 
 financialRouter.delete("/payables/:id", async (req, res) => {

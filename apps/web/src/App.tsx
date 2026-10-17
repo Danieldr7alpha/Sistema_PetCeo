@@ -4212,7 +4212,7 @@ function FinancialOverviewHistoryModal({ target, onClose }: { target: FinancialH
   </Modal>;
 }
 
-function FinancialModule({ sectionPage }: { sectionPage: string }) {
+function FinancialModule({ sectionPage, isAdmin }: { sectionPage: string; isAdmin: boolean }) {
   const { data: accounts, refresh: refreshAccounts } = useData<FinancialAccount[]>("/financial/accounts");
   const { data: methods, refresh: refreshMethods } = useData<FinancialPaymentMethod[]>("/financial/payment-methods");
   const { data: overview, refresh: refreshOverview } = useData<{ payable: number; receivable: number; fees: number }>("/financial/overview");
@@ -4234,7 +4234,7 @@ function FinancialModule({ sectionPage }: { sectionPage: string }) {
     {methodOpen && <FinancialMethodModal method={editingMethod} accounts={(accounts ?? []).filter((account) => account.active)} onClose={() => { setMethodOpen(false); setEditingMethod(null); }} onSaved={() => { setMethodOpen(false); setEditingMethod(null); refreshMethods(); }} />}
   </Page>;
   if (sectionPage === "financial:receivables") return <FinancialReceivables accounts={accounts ?? []} />;
-  if (sectionPage === "financial:payables") return <FinancialPayables accounts={accounts ?? []} onChanged={() => { refreshAccounts(); refreshOverview(); }} />;
+  if (sectionPage === "financial:payables") return <FinancialPayables accounts={accounts ?? []} isAdmin={isAdmin} onChanged={() => { refreshAccounts(); refreshOverview(); }} />;
   if (sectionPage === "financial:movements") return <FinancialMovements accounts={accounts ?? []} />;
   if (sectionPage === "financial:reports") return <FinancialReports />;
   if (sectionPage !== "financial") return <Page title="Financeiro"><div className="panel p-6"><h2 className="font-semibold">Disponível nas próximas fases</h2><p className="mt-2 text-sm text-slate-600">Esta área será ativada incrementalmente após a validação das contas, formas de recebimento, taxas e snapshots da Fase 1.</p></div></Page>;
@@ -4250,7 +4250,7 @@ function FinancialModule({ sectionPage }: { sectionPage: string }) {
 
 const payableCategoryLabels: Record<string, string> = { RENT: "Aluguel", WATER: "Água", ELECTRICITY: "Energia elétrica", INTERNET_PHONE: "Internet e telefone", PAYROLL: "Salários e encargos", TAXES: "Impostos e taxas públicas", PRODUCT_PURCHASE: "Compra de produtos para revenda", GROOMING_SUPPLIES: "Insumos de banho e tosa", CLEANING_SUPPLIES: "Material de limpeza", MAINTENANCE: "Manutenção e equipamentos", MARKETING: "Marketing e publicidade", SOFTWARE: "Sistemas e assinaturas", BANK_FEES: "Tarifas bancárias", FREIGHT: "Fretes e entregas", PROFESSIONAL_SERVICES: "Serviços profissionais", OTHER: "Outras despesas" };
 
-function FinancialPayables({ accounts, onChanged }: { accounts: FinancialAccount[]; onChanged: () => void }) {
+function FinancialPayables({ accounts, isAdmin, onChanged }: { accounts: FinancialAccount[]; isAdmin: boolean; onChanged: () => void }) {
   const [status, setStatus] = useState("OPEN");
   const [period, setPeriod] = useState("10_DAYS");
   const [customFrom, setCustomFrom] = useState(localDateInput());
@@ -4271,6 +4271,7 @@ function FinancialPayables({ accounts, onChanged }: { accounts: FinancialAccount
   const [editing, setEditing] = useState<FinancialPayable | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [paying, setPaying] = useState<FinancialPayable | null>(null);
+  const [correctingPayment, setCorrectingPayment] = useState<FinancialPayable | null>(null);
   const overdue = (payables ?? []).filter((item) => item.status === "OPEN" && new Date(item.dueDate) < new Date()).length;
   const filteredOpenTotal = (payables ?? []).filter((item) => item.status === "OPEN").reduce((total, item) => total + Number(item.amount), 0);
   return <Page title="Contas a pagar" action={<button className="btn btn-primary" onClick={() => { setEditing(null); setFormOpen(true); }}><Plus size={16} />Nova conta</button>}>
@@ -4281,9 +4282,10 @@ function FinancialPayables({ accounts, onChanged }: { accounts: FinancialAccount
       <div className="panel p-4"><label className="text-sm font-medium">Período<select className="field mt-1" value={period} onChange={(e) => setPeriod(e.target.value)}><option value="10_DAYS">Próximos 10 dias</option><option value="WEEK">Próxima semana</option><option value="MONTH">Próximo mês</option><option value="YEAR">Próximo ano</option><option value="CUSTOM">Personalizado</option></select></label></div>
     </div>
     {period === "CUSTOM" && <div className="panel mb-4 grid gap-3 p-4 sm:grid-cols-2"><label className="text-sm font-semibold">Data inicial<input className="field mt-1" type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} /></label><label className="text-sm font-semibold">Data final<input className="field mt-1" type="date" min={customFrom} value={customTo} onChange={(e) => setCustomTo(e.target.value)} /></label></div>}
-    <div className="grid gap-3">{(payables ?? []).map((item) => { const isOverdue = item.status === "OPEN" && new Date(item.dueDate) < new Date(); return <div className="panel grid gap-3 p-4 lg:grid-cols-[1fr_170px_160px_auto] lg:items-center" key={item.id}><div><div className="flex flex-wrap items-center gap-2"><b>{item.description}</b><span className={`rounded-full px-2 py-0.5 text-xs ${isOverdue ? "bg-red-100 text-red-700" : item.status === "PAID" ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"}`}>{isOverdue ? "Vencida" : item.status === "PAID" ? "Paga" : item.status === "CANCELLED" ? "Cancelada" : "Em aberto"}</span><span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs">{item.expenseType === "FIXED" ? "Fixa" : "Variável"}</span></div><p className="mt-1 text-sm text-slate-600">{payableCategoryLabels[item.category] ?? item.category}{item.supplierName ? ` · ${item.supplierName}` : ""}{item.documentNumber ? ` · Documento ${item.documentNumber}` : ""}</p>{item.installmentTotal > 1 && <p className="text-xs text-slate-500">Parcela {item.installmentNumber}/{item.installmentTotal}</p>}</div><div><p className="text-xs text-slate-500">Vencimento</p><b>{dateBR(item.dueDate)}</b></div><div><p className="text-xs text-slate-500">Valor</p><b className="text-lg">{currency(item.amount)}</b></div><div className="flex flex-wrap justify-end gap-2">{item.status === "OPEN" && <><button className="btn btn-primary" onClick={() => setPaying(item)}>Pagar</button><button className="btn btn-secondary" onClick={() => { setEditing(item); setFormOpen(true); }}>Editar</button><button className="btn btn-secondary text-red-700" onClick={async () => { if (!window.confirm(`Excluir a conta ${item.description}?`)) return; await api(`/financial/payables/${item.id}`, { method: "DELETE" }); refresh(); }}>Excluir</button></>}{item.status === "PAID" && <p className="text-sm text-slate-600">Pago em {item.paidAt ? dateBR(item.paidAt) : "-"}<br />{item.paidFromAccount?.name ?? ""}</p>}</div></div>; })}{!payables?.length && <div className="panel p-8 text-center text-slate-500">Nenhuma conta encontrada.</div>}</div>
+    <div className="grid gap-3">{(payables ?? []).map((item) => { const isOverdue = item.status === "OPEN" && new Date(item.dueDate) < new Date(); return <div className="panel grid gap-3 p-4 lg:grid-cols-[1fr_170px_160px_auto] lg:items-center" key={item.id}><div><div className="flex flex-wrap items-center gap-2"><b>{item.description}</b><span className={`rounded-full px-2 py-0.5 text-xs ${isOverdue ? "bg-red-100 text-red-700" : item.status === "PAID" ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"}`}>{isOverdue ? "Vencida" : item.status === "PAID" ? "Paga" : item.status === "CANCELLED" ? "Cancelada" : "Em aberto"}</span><span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs">{item.expenseType === "FIXED" ? "Fixa" : "Variável"}</span></div><p className="mt-1 text-sm text-slate-600">{payableCategoryLabels[item.category] ?? item.category}{item.supplierName ? ` · ${item.supplierName}` : ""}{item.documentNumber ? ` · Documento ${item.documentNumber}` : ""}</p>{item.installmentTotal > 1 && <p className="text-xs text-slate-500">Parcela {item.installmentNumber}/{item.installmentTotal}</p>}</div><div><p className="text-xs text-slate-500">Vencimento</p><b>{dateBR(item.dueDate)}</b></div><div><p className="text-xs text-slate-500">Valor</p><b className="text-lg">{currency(item.amount)}</b></div><div className="flex flex-wrap justify-end gap-2">{item.status === "OPEN" && <><button className="btn btn-primary" onClick={() => setPaying(item)}>Pagar</button><button className="btn btn-secondary" onClick={() => { setEditing(item); setFormOpen(true); }}>Editar</button><button className="btn btn-secondary text-red-700" onClick={async () => { if (!window.confirm(`Excluir a conta ${item.description}?`)) return; await api(`/financial/payables/${item.id}`, { method: "DELETE" }); refresh(); }}>Excluir</button></>}{item.status === "PAID" && <div className="flex items-center gap-1 text-sm text-slate-600"><p>Pago em {item.paidAt ? dateBR(item.paidAt) : "-"}<br />{item.paidFromAccount?.name ?? ""}</p><button className="btn btn-secondary !h-9 !w-9 !p-0" title="Corrigir conta de saída" aria-label={`Corrigir conta de saída de ${item.description}`} onClick={() => setCorrectingPayment(item)}><Pencil size={15} /></button></div>}</div></div>; })}{!payables?.length && <div className="panel p-8 text-center text-slate-500">Nenhuma conta encontrada.</div>}</div>
     {formOpen && <PayableModal payable={editing} onClose={() => { setFormOpen(false); setEditing(null); }} onSaved={() => { setFormOpen(false); setEditing(null); refresh(); onChanged(); }} />}
     {paying && <PayablePaymentModal payable={paying} accounts={accounts} onClose={() => setPaying(null)} onSaved={() => { setPaying(null); refresh(); onChanged(); }} />}
+    {correctingPayment && <PaidPayableAccountModal payable={correctingPayment} accounts={accounts} isAdmin={isAdmin} onClose={() => setCorrectingPayment(null)} onSaved={() => { setCorrectingPayment(null); refresh(); onChanged(); }} />}
   </Page>;
 }
 
@@ -4321,6 +4323,31 @@ function PayablePaymentModal({ payable, accounts, onClose, onSaved }: { payable:
     <label className="text-sm font-semibold">Como foi pago?<select className="field mt-1" value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })}><option>PIX</option><option>Dinheiro</option><option>Débito automático</option><option>Boleto</option><option>Transferência</option><option>Cartão</option><option>Outro</option></select></label>
     <label className="text-sm font-semibold sm:col-span-2">Anexar comprovante <span className="font-normal text-slate-500">(PDF, foto ou imagem — máximo 2 MB)</span><input className="field mt-1" type="file" accept="image/*,.pdf" onChange={(e) => chooseReceipt(e.target.files?.[0])} />{form.receiptFileName && <span className="mt-1 block text-sm font-normal text-emerald-700">Arquivo selecionado: {form.receiptFileName}</span>}</label>
     {error && <p className="rounded-md bg-red-50 p-3 text-sm text-red-700 sm:col-span-2">{error}</p>}<button className="btn btn-primary justify-self-end sm:col-span-2" disabled={saving}>{saving ? "Registrando..." : "Confirmar pagamento"}</button>
+  </form></Modal>;
+}
+
+function PaidPayableAccountModal({ payable, accounts, isAdmin, onClose, onSaved }: { payable: FinancialPayable; accounts: FinancialAccount[]; isAdmin: boolean; onClose: () => void; onSaved: () => void }) {
+  const [paidFromAccountId, setPaidFromAccountId] = useState(payable.paidFromAccount?.id ?? "");
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  async function submit(event: React.FormEvent) {
+    event.preventDefault(); setError(""); setSaving(true);
+    try {
+      await api(`/financial/payables/${payable.id}/payment-account`, { method: "PATCH", body: JSON.stringify({ paidFromAccountId, ...(isAdmin ? {} : { adminEmail, adminPassword }) }) });
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Não foi possível corrigir a conta de saída.");
+    } finally { setSaving(false); }
+  }
+  return <Modal title="Corrigir conta do pagamento" onClose={onClose}><form className="grid gap-4" onSubmit={submit}>
+    <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950"><b>{payable.description}</b><p className="mt-1">Esta alteração move o valor de {payable.paidFromAccount?.name ?? "conta não informada"} para a conta selecionada e atualiza os saldos automaticamente.</p></div>
+    <label className="text-sm font-semibold">O dinheiro saiu de qual conta?<select className="field mt-1" required value={paidFromAccountId} onChange={(event) => setPaidFromAccountId(event.target.value)}><option value="">Selecione...</option>{accounts.map((account) => <option value={account.id} key={account.id}>{account.name}</option>)}</select></label>
+    {!isAdmin && <fieldset className="rounded-lg border border-slate-200 p-3"><legend className="px-1 text-sm font-semibold">Autorização do administrador</legend><p className="mb-3 text-sm text-slate-600">Informe o login e a senha do dono ou administrador para confirmar a correção.</p><div className="grid gap-3 sm:grid-cols-2"><label className="text-sm font-semibold">E-mail do administrador<input className="field mt-1" required type="email" autoComplete="username" value={adminEmail} onChange={(event) => setAdminEmail(event.target.value)} /></label><label className="text-sm font-semibold">Senha<input className="field mt-1" required type="password" autoComplete="current-password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} /></label></div></fieldset>}
+    {isAdmin && <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">Você está logado como administrador; não é necessário confirmar a senha.</p>}
+    {error && <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+    <div className="flex justify-end gap-2"><button className="btn btn-secondary" type="button" onClick={onClose}>Cancelar</button><button className="btn btn-primary" disabled={saving || !paidFromAccountId || (!isAdmin && (!adminEmail || !adminPassword))}>{saving ? "Corrigindo..." : "Confirmar correção"}</button></div>
   </form></Modal>;
 }
 
@@ -4650,7 +4677,7 @@ export function App() {
     if (!canAccess(page) && !(page.startsWith("checkout") && canAccess("checkout")) && !(page.startsWith("financial") && canAccess("financial"))) return <Page title="Acesso negado"><p className="panel p-4 text-sm text-red-700">Você não possui permissão para acessar esta área.</p></Page>;
     if (page.startsWith("checkout")) return <Checkout draft={checkoutDraft} chargeSaleId={checkoutSaleId} onClearDraft={() => setCheckoutDraft(null)} session={session as Session} sectionPage={page} />;
     if (page.startsWith("financial")) return session?.user.role === "ADMIN" || canAccess(page)
-      ? <FinancialModule sectionPage={page} />
+      ? <FinancialModule sectionPage={page} isAdmin={session?.user.role === "ADMIN"} />
       : <Page title="Acesso negado"><p className="panel p-4 text-sm text-red-700">Você não possui permissão para acessar o Financeiro.</p></Page>;
     return ({
       dashboard: <Dashboard />,
