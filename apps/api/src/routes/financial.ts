@@ -224,16 +224,16 @@ financialRouter.get("/overview/history", async (req, res) => {
     const [installments, legacyPayments] = await Promise.all([
       prisma.salePaymentInstallment.findMany({
         where: { expectedSettlementDate: { gt: now }, salePayment: { companyId: cid } },
-        select: { id: true, expectedSettlementDate: true, installmentNumber: true, netAmount: true, grossAmount: true, feeAmount: true, salePayment: { select: { installments: true, paymentMethodNameSnapshot: true, method: true, destinationAccount: { select: { name: true } }, sale: { select: { internalCode: true, customer: { select: { name: true } } } } } } }
+        select: { id: true, expectedSettlementDate: true, installmentNumber: true, netAmount: true, grossAmount: true, feeAmount: true, salePayment: { select: { paidAt: true, installments: true, paymentMethodNameSnapshot: true, method: true, destinationAccount: { select: { name: true } }, sale: { select: { internalCode: true, customer: { select: { name: true } } } } } } }
       }),
       prisma.salePayment.findMany({
         where: { companyId: cid, expectedSettlementDate: { gt: now }, settlementInstallments: { none: {} } },
-        select: { id: true, expectedSettlementDate: true, netAmount: true, grossAmount: true, feeAmount: true, paymentMethodNameSnapshot: true, method: true, destinationAccount: { select: { name: true } }, sale: { select: { internalCode: true, customer: { select: { name: true } } } } }
+        select: { id: true, expectedSettlementDate: true, paidAt: true, netAmount: true, grossAmount: true, feeAmount: true, paymentMethodNameSnapshot: true, method: true, destinationAccount: { select: { name: true } }, sale: { select: { internalCode: true, customer: { select: { name: true } } } } }
       })
     ]);
     const scheduled = [
-      ...installments.map((item) => ({ id: `installment-${item.id}`, date: item.expectedSettlementDate, direction: "IN", amount: number(item.netAmount), grossAmount: number(item.grossAmount), feeAmount: number(item.feeAmount), description: `${item.salePayment.paymentMethodNameSnapshot ?? item.salePayment.method} · Venda ${item.salePayment.sale.internalCode ?? "-"} · Parcela ${item.installmentNumber}/${item.salePayment.installments ?? 1}`, detail: `${item.salePayment.sale.customer?.name ?? "Cliente não informado"} · Previsão no banco: ${item.salePayment.destinationAccount?.name ?? "Não informado"}` })),
-      ...legacyPayments.map((item) => ({ id: `payment-${item.id}`, date: item.expectedSettlementDate!, direction: "IN", amount: number(item.netAmount), grossAmount: number(item.grossAmount), feeAmount: number(item.feeAmount), description: `${item.paymentMethodNameSnapshot ?? item.method} · Venda ${item.sale.internalCode ?? "-"}`, detail: `${item.sale.customer?.name ?? "Cliente não informado"} · Previsão no banco: ${item.destinationAccount?.name ?? "Não informado"}` }))
+      ...installments.map((item) => ({ id: `installment-${item.id}`, date: item.expectedSettlementDate, paidAt: item.salePayment.paidAt, direction: "IN", amount: number(item.netAmount), grossAmount: number(item.grossAmount), feeAmount: number(item.feeAmount), description: `${item.salePayment.paymentMethodNameSnapshot ?? item.salePayment.method} · Venda ${item.salePayment.sale.internalCode ?? "-"} · Parcela ${item.installmentNumber}/${item.salePayment.installments ?? 1}`, detail: `${item.salePayment.sale.customer?.name ?? "Cliente não informado"} · Previsão no banco: ${item.salePayment.destinationAccount?.name ?? "Não informado"}` })),
+      ...legacyPayments.map((item) => ({ id: `payment-${item.id}`, date: item.expectedSettlementDate!, paidAt: item.paidAt, direction: "IN", amount: number(item.netAmount), grossAmount: number(item.grossAmount), feeAmount: number(item.feeAmount), description: `${item.paymentMethodNameSnapshot ?? item.method} · Venda ${item.sale.internalCode ?? "-"}`, detail: `${item.sale.customer?.name ?? "Cliente não informado"} · Previsão no banco: ${item.destinationAccount?.name ?? "Não informado"}` }))
     ];
     const scheduledTotal = scheduled.reduce((sum, item) => sum + item.amount, 0);
     return res.json({
@@ -306,11 +306,35 @@ financialRouter.get("/receivables", async (req, res) => {
   });
   const now = new Date();
   const items = [
-    ...installmentRows.map((row) => ({ id: row.id, expectedDate: row.expectedSettlementDate, status: row.expectedSettlementDate <= now ? "RECEIVED" : "EXPECTED", installmentNumber: row.installmentNumber, installments: row.salePayment.installments ?? 1, grossAmount: Number(row.grossAmount), feeAmount: Number(row.feeAmount), netAmount: Number(row.netAmount), methodName: row.salePayment.paymentMethodNameSnapshot ?? row.salePayment.method, brand: row.salePayment.cardBrandSnapshot ?? row.salePayment.cardBrand, institution: row.salePayment.institutionNameSnapshot, account: row.salePayment.destinationAccount, saleCode: row.salePayment.sale.internalCode, receiptCode: row.salePayment.sale.receipt?.receiptCode, customerName: row.salePayment.sale.customer?.name, nsu: row.salePayment.cardNsu })),
-    ...legacyRows.map((row) => ({ id: row.id, expectedDate: row.expectedSettlementDate, status: row.expectedSettlementDate! <= now ? "RECEIVED" : "EXPECTED", installmentNumber: 1, installments: row.installments ?? 1, grossAmount: Number(row.grossAmount ?? row.amount), feeAmount: Number(row.feeAmount ?? 0), netAmount: Number(row.netAmount ?? row.amount), methodName: row.paymentMethodNameSnapshot ?? row.method, brand: row.cardBrandSnapshot ?? row.cardBrand, institution: row.institutionNameSnapshot, account: row.destinationAccount, saleCode: row.sale.internalCode, receiptCode: row.sale.receipt?.receiptCode, customerName: row.sale.customer?.name, nsu: row.cardNsu }))
+    ...installmentRows.map((row) => ({ id: row.id, source: "INSTALLMENT", expectedDate: row.expectedSettlementDate, paidAt: row.salePayment.paidAt, status: row.expectedSettlementDate <= now ? "RECEIVED" : "EXPECTED", installmentNumber: row.installmentNumber, installments: row.salePayment.installments ?? 1, grossAmount: Number(row.grossAmount), feeAmount: Number(row.feeAmount), netAmount: Number(row.netAmount), methodName: row.salePayment.paymentMethodNameSnapshot ?? row.salePayment.method, brand: row.salePayment.cardBrandSnapshot ?? row.salePayment.cardBrand, institution: row.salePayment.institutionNameSnapshot, account: row.salePayment.destinationAccount, saleCode: row.salePayment.sale.internalCode, receiptCode: row.salePayment.sale.receipt?.receiptCode, customerName: row.salePayment.sale.customer?.name, nsu: row.salePayment.cardNsu })),
+    ...legacyRows.map((row) => ({ id: row.id, source: "PAYMENT", expectedDate: row.expectedSettlementDate, paidAt: row.paidAt, status: row.expectedSettlementDate! <= now ? "RECEIVED" : "EXPECTED", installmentNumber: 1, installments: row.installments ?? 1, grossAmount: Number(row.grossAmount ?? row.amount), feeAmount: Number(row.feeAmount ?? 0), netAmount: Number(row.netAmount ?? row.amount), methodName: row.paymentMethodNameSnapshot ?? row.method, brand: row.cardBrandSnapshot ?? row.cardBrand, institution: row.institutionNameSnapshot, account: row.destinationAccount, saleCode: row.sale.internalCode, receiptCode: row.sale.receipt?.receiptCode, customerName: row.sale.customer?.name, nsu: row.cardNsu }))
   ].sort((a, b) => new Date(a.expectedDate!).getTime() - new Date(b.expectedDate!).getTime());
   const filtered = req.query.status === "EXPECTED" ? items.filter((item) => item.status === "EXPECTED") : req.query.status === "RECEIVED" ? items.filter((item) => item.status === "RECEIVED") : items;
   res.json({ items: filtered, summary: { gross: filtered.reduce((sum, item) => sum + item.grossAmount, 0), fees: filtered.reduce((sum, item) => sum + item.feeAmount, 0), net: filtered.reduce((sum, item) => sum + item.netAmount, 0), count: filtered.length }, from: start, to: end });
+});
+
+financialRouter.post("/receivables/:id/confirm-received", async (req, res) => {
+  const cid = companyId(req);
+  const body = z.object({
+    source: z.enum(["INSTALLMENT", "PAYMENT"]), receivedAt: z.string().date(),
+    adminEmail: z.string().trim().email().optional(), adminPassword: z.string().min(1).optional()
+  }).parse(req.body);
+  if (!(await approvedByOwner(req, cid, body.adminEmail, body.adminPassword))) {
+    return res.status(403).json({ message: "Para confirmar um recebimento antes do prazo, informe o e-mail e a senha de um administrador." });
+  }
+  const now = new Date();
+  const today = now.toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  if (body.receivedAt > today) return res.status(400).json({ message: "A data de recebimento não pode estar no futuro." });
+  // For today, retain the current timestamp so the receipt appears immediately as received.
+  const receivedAt = body.receivedAt === today ? now : payableDate(body.receivedAt);
+  if (body.source === "INSTALLMENT") {
+    const item = await prisma.salePaymentInstallment.findFirst({ where: { id: req.params.id, salePayment: { companyId: cid } } });
+    if (!item) return res.status(404).json({ message: "Parcela de recebimento não encontrada." });
+    return res.json(await prisma.salePaymentInstallment.update({ where: { id: item.id }, data: { expectedSettlementDate: receivedAt } }));
+  }
+  const item = await prisma.salePayment.findFirst({ where: { id: req.params.id, companyId: cid, settlementInstallments: { none: {} } } });
+  if (!item) return res.status(404).json({ message: "Recebimento não encontrado." });
+  return res.json(await prisma.salePayment.update({ where: { id: item.id }, data: { expectedSettlementDate: receivedAt } }));
 });
 
 financialRouter.get("/movements", async (req, res) => {
