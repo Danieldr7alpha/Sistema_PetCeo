@@ -1505,6 +1505,35 @@ function RescheduleAppointmentForm({ appointment, onClose, onSaved }: { appointm
   </Modal>;
 }
 
+function ServiceSearchPicker({ services, excludedServiceIds = [], onSelect }: { services: Service[]; excludedServiceIds?: string[]; onSelect: (serviceId: string) => void }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const fieldId = useId();
+  const searchText = (value?: string) => normalizeOption(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const terms = searchText(query).split(" ").filter(Boolean);
+  const matches = terms.length
+    ? services.filter((service) => {
+      if (excludedServiceIds.includes(service.id)) return false;
+      const searchable = searchText([service.name, service.category, service.petSize, petSizeLabels[service.petSize ?? ""], service.coat].filter(Boolean).join(" "));
+      return terms.every((term) => searchable.includes(term));
+    }).slice(0, 20)
+    : [];
+  function choose(serviceId: string) {
+    onSelect(serviceId);
+    setQuery("");
+    setOpen(false);
+  }
+  return <div className="relative">
+    <label className="sr-only" htmlFor={fieldId}>Buscar serviço</label>
+    <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input className="field w-full pl-9" id={fieldId} placeholder="Digite para buscar serviço: ex. tosa médio" value={query} onFocus={() => setOpen(true)} onBlur={() => window.setTimeout(() => setOpen(false), 150)} onChange={(event) => { setQuery(event.target.value); setOpen(true); }} onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }} /></div>
+    {open && <div className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+      {!terms.length && <p className="p-3 text-sm text-slate-500">Digite o nome, tipo ou porte do serviço para buscar.</p>}
+      {!!terms.length && !matches.length && <p className="p-3 text-sm text-slate-500">Nenhum serviço encontrado.</p>}
+      {matches.map((service) => <button className="w-full rounded-md p-3 text-left text-sm hover:bg-blue-50" key={service.id} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => choose(service.id)}><b className="block text-slate-900">{service.name}</b><span className="text-slate-600">{servicePetSizeLabel(service.petSize)} · {serviceCoatLabel(service.coat)} · {currency(service.price)}</span></button>)}
+    </div>}
+  </div>;
+}
+
 function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer, onRenewMembership, onClose, onSaved }: { services: Service[]; initialDate?: string; initialTime?: string; onCreateCustomer: () => void; onRenewMembership: () => void; onClose: () => void; onSaved: () => void }) {
   const [customerQuery, setCustomerQuery] = useState("");
   const [results, setResults] = useState<Customer[]>([]);
@@ -1743,6 +1772,12 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
     {selectedCustomer && activePets.length === 0 && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Este cliente ainda não possui pet cadastrado.</p>}
     {selectedCustomer && activePets.length === 1 && <div className="rounded-lg bg-slate-50 p-3 text-sm"><b>Pet:</b> {activePets[0].name}</div>}
     {selectedCustomer && activePets.length > 1 && <label className="text-sm font-medium text-slate-700">Pet principal<select className="field mt-1" value={form.petId} onChange={(e) => { setForm({ ...form, petId: e.target.value }); setAddedPetIds([]); setOtherPetServiceIds({}); setOtherPetMembershipOptions({}); setOtherPetMembershipIds({}); setPetPickerOpen(false); }}>{activePets.map((pet) => <option key={pet.id} value={pet.id}>{pet.name}</option>)}</select></label>}
+    {selectedCustomer && petId && <section className="grid gap-2">
+      <h3 className="text-sm font-semibold text-slate-700">Serviços avulsos adicionais — {activePets.find((pet) => pet.id === petId)?.name ?? "pet principal"}</h3>
+      <ServiceSearchPicker services={services} excludedServiceIds={[...additionalServiceIds, ...(paymentMode !== "AVULSO" && form.serviceId ? [form.serviceId] : [])]} onSelect={addAdditionalService} />
+      {serviceSelectionError && <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">{serviceSelectionError}</p>}
+      {!!additionalServices.length && <div className="grid gap-2">{additionalServices.map((service) => <div className="flex flex-col gap-3 rounded-lg border border-slate-200 p-3 text-sm sm:flex-row sm:items-center sm:justify-between" key={service.id}><div><b>{service.name}</b><p className="text-slate-600">{servicePetSizeLabel(service.petSize)} · {serviceCoatLabel(service.coat)}</p><p className="font-semibold text-blue-800">{currency(service.price)}</p></div><button className="btn btn-secondary min-h-11 justify-center text-red-700" type="button" onClick={() => { setAdditionalServiceIds((current) => current.filter((id) => id !== service.id)); setServiceSelectionError(""); }}>Remover</button></div>)}</div>}
+    </section>}
     {selectedCustomer && availableAdditionalPets.length > 0 && <button className="btn btn-secondary justify-self-start" type="button" onClick={() => setPetPickerOpen((open) => !open)}>+ Pet</button>}
     {selectedCustomer && petPickerOpen && <section className="grid gap-3 rounded-lg border border-slate-300 bg-slate-50 p-3">
       <div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-semibold text-slate-900">Escolha o próximo pet</h3><p className="text-sm text-slate-600">Apenas pets que ainda não estão neste agendamento aparecem aqui.</p></div><button className="btn btn-secondary" type="button" onClick={() => setPetPickerOpen(false)}>Fechar</button></div>
@@ -1779,15 +1814,6 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
         </div>;
       })}
     </section>}
-    <section className="grid gap-2">
-      <h3 className="text-sm font-semibold text-slate-700">Serviços avulsos adicionais — {activePets.find((pet) => pet.id === petId)?.name ?? "pet principal"}</h3>
-      <select className="field w-full" value="" onChange={(event) => addAdditionalService(event.target.value)}>
-        <option value="">Adicionar serviço avulso...</option>
-        {services.map((service) => <option key={service.id} value={service.id}>{service.name} — {currency(service.price)}</option>)}
-      </select>
-      {serviceSelectionError && <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">{serviceSelectionError}</p>}
-      {!!additionalServices.length && <div className="grid gap-2">{additionalServices.map((service) => <div className="flex flex-col gap-3 rounded-lg border border-slate-200 p-3 text-sm sm:flex-row sm:items-center sm:justify-between" key={service.id}><div><b>{service.name}</b><p className="text-slate-600">{servicePetSizeLabel(service.petSize)} · {serviceCoatLabel(service.coat)}</p><p className="font-semibold text-blue-800">{currency(service.price)}</p></div><button className="btn btn-secondary min-h-11 justify-center text-red-700" type="button" onClick={() => { setAdditionalServiceIds((current) => current.filter((id) => id !== service.id)); setServiceSelectionError(""); }}>Remover</button></div>)}</div>}
-    </section>
     {addedPetIds.map((addedPetId) => {
       const addedPet = activePets.find((pet) => pet.id === addedPetId);
       const petColorIndex = Math.max(0, activePets.findIndex((pet) => pet.id === addedPetId)) % additionalPetColorStyles.length;
@@ -1808,10 +1834,7 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
           {selectedPetMembership && <p className="font-medium text-emerald-800">O serviço {selectedPetMembership.plan.service.name} será coberto pelo pacote deste pet.</p>}
         </div>}
         <h4 className="text-sm font-semibold text-slate-700">Serviços avulsos adicionais — {addedPet?.name}</h4>
-        <select className="field w-full" value="" onChange={(event) => addServiceForPet(addedPetId, event.target.value)}>
-          <option value="">Adicionar serviço avulso...</option>
-          {services.filter((service) => !selectedIds.includes(service.id) && service.id !== selectedPetMembership?.plan.service.id).map((service) => <option key={service.id} value={service.id}>{service.name} — {currency(service.price)}</option>)}
-        </select>
+        <ServiceSearchPicker services={services} excludedServiceIds={[...selectedIds, ...(selectedPetMembership?.plan.service.id ? [selectedPetMembership.plan.service.id] : [])]} onSelect={(serviceId) => addServiceForPet(addedPetId, serviceId)} />
         {!!selectedServices.length && <div className="grid gap-2">{selectedServices.map((service) => <div className={`flex flex-col gap-3 rounded-lg border bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between ${petColorStyle.item}`} key={service.id}><div><b>{service.name}</b><p className="text-slate-600">{servicePetSizeLabel(service.petSize)} · {serviceCoatLabel(service.coat)}</p><p className={`font-semibold ${petColorStyle.price}`}>{currency(service.price)}</p></div><button className="btn btn-secondary min-h-11 justify-center text-red-700" type="button" onClick={() => setOtherPetServiceIds((current) => ({ ...current, [addedPetId]: selectedIds.filter((id) => id !== service.id) }))}>Remover</button></div>)}</div>}
         {!selectedServices.length && !selectedPetMembership && <p className="text-sm text-amber-800">Escolha um pacote ou adicione ao menos um serviço para este pet.</p>}
       </section>;
