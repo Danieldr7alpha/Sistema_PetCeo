@@ -417,8 +417,9 @@ async function completeMembershipPurchaseOnce(db: any, cid: string, saleId: stri
   const localToday = dateInSaoPaulo(startDate);
   const firstDate = new Date(`${localToday}T12:00:00-03:00`);
   firstDate.setDate(firstDate.getDate() + ((weekday - firstDate.getDay() + 7) % 7));
-  const firstTime = new Date(`${dateInSaoPaulo(firstDate)}T${time}:00-03:00`);
-  if (firstTime <= startDate) firstDate.setDate(firstDate.getDate() + 7);
+  // The first use belongs to the day the package is paid. Even if its
+  // preferred time has already passed, do not postpone it by a whole week.
+  // Subsequent uses keep the weekly schedule below.
   const weekInterval = Math.max(1, Math.round(membership.plan.suggestedFrequencyDays / 7));
   for (let index = 0; index < membership.totalUses; index += 1) {
     const appointmentDate = new Date(firstDate); appointmentDate.setDate(firstDate.getDate() + index * weekInterval * 7);
