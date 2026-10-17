@@ -3672,7 +3672,8 @@ function CashReports({ isAdmin, cashSession, closingReport = false, onDismiss }:
     { label: "Cancelados", value: reportData?.cancelledTotal ?? 0 },
     { label: "Estornos", value: reportData?.refundedTotal ?? 0 },
     { label: "Desconto", value: reportData?.discountsTotal ?? 0 },
-    { label: "Total", value: reportData?.totalReceived ?? 0 }
+    { label: "Total", value: reportData?.totalReceived ?? 0 },
+    { label: "A receber", value: reportData?.pendingTotal ?? 0 }
   ];
   if (!isAdmin) return <div className="panel p-4 text-sm text-slate-600">Relatórios são visíveis apenas para administradores.</div>;
   return <div className="grid gap-4" id={closingReport ? "cash-closing-report" : undefined}>

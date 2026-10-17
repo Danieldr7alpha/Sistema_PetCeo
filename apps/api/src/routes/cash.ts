@@ -192,6 +192,18 @@ function periodFromQuery(req: Request) {
   return { from, to };
 }
 
+function dayRangeInSaoPaulo(date: Date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit"
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
+  const day = `${part("year")}-${part("month")}-${part("day")}`;
+  return {
+    from: new Date(`${day}T00:00:00.000-03:00`),
+    to: new Date(`${day}T23:59:59.999-03:00`)
+  };
+}
+
 async function cashReportSummary(req: Request, res: import("express").Response) {
   if (req.user?.role !== "ADMIN") return res.status(403).json({ message: "Você não possui permissão para executar esta ação." });
   const cid = companyId(req);
@@ -205,6 +217,7 @@ async function cashReportSummary(req: Request, res: import("express").Response) 
     include: { movements: { orderBy: { createdAt: "asc" } } },
     orderBy: { openedAt: "asc" }
   });
+  const pendingRange = cashSessionId && sessions[0] ? dayRangeInSaoPaulo(sessions[0].openedAt) : { from, to };
   const sales = await prisma.sale.findMany({
     where: { companyId: cid, ...cashSessionFilter, ...(cashSessionId ? {} : { createdAt: { gte: from, lte: to } }) },
     include: { items: { include: { service: true, product: true } } }
@@ -225,6 +238,14 @@ async function cashReportSummary(req: Request, res: import("express").Response) 
     },
     include: { sale: { include: { customer: true, pet: true, receipt: true } } },
     orderBy: { paidAt: "asc" }
+  });
+  const pendingSales = await prisma.sale.findMany({
+    where: {
+      companyId: cid,
+      status: { in: ["PENDING", "PARTIALLY_PAID"] },
+      createdAt: { gte: pendingRange.from, lte: pendingRange.to }
+    },
+    select: { pendingAmount: true, total: true }
   });
   const totalsByMethod = Object.fromEntries(paymentMethods.map((method) => [method, 0])) as Record<typeof paymentMethods[number], number>;
   const byOperator = new Map<string, number>();
@@ -249,13 +270,13 @@ async function cashReportSummary(req: Request, res: import("express").Response) 
   for (const sale of sales) {
     const total = Number(sale.total);
     discountsTotal += Number(sale.discount);
-    if (sale.status === "PENDING" || sale.status === "PARTIALLY_PAID") pendingTotal += Number(sale.pendingAmount || total);
     if (sale.status === "CANCELLED") cancelledTotal += total;
     for (const item of sale.items) {
       if (item.itemType === "SERVICE") byService.set(item.description, (byService.get(item.description) ?? 0) + Number(item.total));
       if (item.itemType === "PRODUCT") byProduct.set(item.description, (byProduct.get(item.description) ?? 0) + Number(item.total));
     }
   }
+  pendingTotal = pendingSales.reduce((sum, sale) => sum + Number(sale.pendingAmount || sale.total), 0);
 
   return res.json({
     from,
