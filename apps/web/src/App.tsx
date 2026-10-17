@@ -1523,11 +1523,21 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
   const [additionalServiceIds, setAdditionalServiceIds] = useState<string[]>([]);
   const [serviceSelectionError, setServiceSelectionError] = useState("");
   const [addedPetIds, setAddedPetIds] = useState<string[]>([]);
+  const [petPickerOpen, setPetPickerOpen] = useState(false);
   const [otherPetServiceIds, setOtherPetServiceIds] = useState<Record<string, string[]>>({});
   const [otherPetMembershipOptions, setOtherPetMembershipOptions] = useState<Record<string, Membership[]>>({});
   const [otherPetMembershipIds, setOtherPetMembershipIds] = useState<Record<string, string>>({});
   const activePets = selectedCustomer?.pets.filter((pet) => pet.status === "ACTIVE") ?? [];
   const petId = form.petId || activePets[0]?.id;
+  const availableAdditionalPets = activePets.filter((pet) => pet.id !== petId && !addedPetIds.includes(pet.id));
+  const additionalPetColorStyles = [
+    { panel: "border-sky-300 bg-sky-50", dot: "bg-sky-600", title: "text-sky-950", description: "text-sky-800", item: "border-sky-100", price: "text-sky-800" },
+    { panel: "border-violet-300 bg-violet-50", dot: "bg-violet-600", title: "text-violet-950", description: "text-violet-800", item: "border-violet-100", price: "text-violet-800" },
+    { panel: "border-amber-300 bg-amber-50", dot: "bg-amber-600", title: "text-amber-950", description: "text-amber-800", item: "border-amber-100", price: "text-amber-800" },
+    { panel: "border-emerald-300 bg-emerald-50", dot: "bg-emerald-600", title: "text-emerald-950", description: "text-emerald-800", item: "border-emerald-100", price: "text-emerald-800" },
+    { panel: "border-rose-300 bg-rose-50", dot: "bg-rose-600", title: "text-rose-950", description: "text-rose-800", item: "border-rose-100", price: "text-rose-800" },
+    { panel: "border-cyan-300 bg-cyan-50", dot: "bg-cyan-600", title: "text-cyan-950", description: "text-cyan-800", item: "border-cyan-100", price: "text-cyan-800" }
+  ];
   const additionalServices = additionalServiceIds.map((id) => services.find((service) => service.id === id)).filter((service): service is Service => Boolean(service));
   const additionalTotal = additionalServices.reduce((sum, service) => sum + Number(service.price), 0);
   const otherPetsTotal = addedPetIds.reduce((sum, addedPetId) => sum + (otherPetServiceIds[addedPetId] ?? []).reduce((petSum, serviceId) => petSum + Number(services.find((service) => service.id === serviceId)?.price ?? 0), 0), 0);
@@ -1581,6 +1591,11 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
     setCustomerQuery(`${customerCode(customer)} — ${customer.name}`);
     setResults([]);
     setForm({ ...form, petId: matchedPet?.id ?? (pets.length === 1 ? pets[0].id : "") });
+    setAddedPetIds([]);
+    setOtherPetServiceIds({});
+    setOtherPetMembershipOptions({});
+    setOtherPetMembershipIds({});
+    setPetPickerOpen(false);
   }
   function clearCustomer() {
     setSelectedCustomer(null);
@@ -1597,6 +1612,7 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
     setOtherPetServiceIds({});
     setOtherPetMembershipOptions({});
     setOtherPetMembershipIds({});
+    setPetPickerOpen(false);
   }
   function addAdditionalService(serviceId: string) {
     setServiceSelectionError("");
@@ -1619,11 +1635,12 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
       return { ...current, [addedPetId]: [...selected, serviceId] };
     });
   }
-  function addNextPet() {
-    const nextPet = activePets.find((pet) => pet.id !== petId && !addedPetIds.includes(pet.id));
-    if (!nextPet) return;
+  function addPet(addedPetId: string) {
+    const nextPet = activePets.find((pet) => pet.id === addedPetId);
+    if (!nextPet || nextPet.id === petId || addedPetIds.includes(nextPet.id)) return;
     setAddedPetIds((current) => [...current, nextPet.id]);
     setOtherPetServiceIds((current) => ({ ...current, [nextPet.id]: [] }));
+    setPetPickerOpen(false);
     api<Membership[]>(`/memberships/pet/${nextPet.id}/options`)
       .then((options) => setOtherPetMembershipOptions((current) => ({ ...current, [nextPet.id]: options })))
       .catch(() => setOtherPetMembershipOptions((current) => ({ ...current, [nextPet.id]: [] })));
@@ -1725,8 +1742,12 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
     {selectedCustomer && <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900"><b>{customerCode(selectedCustomer)} — {selectedCustomer.name}</b><p>{formatPhone(selectedCustomer.phone)} · {formatCpf(selectedCustomer.cpf)}</p></div>}
     {selectedCustomer && activePets.length === 0 && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Este cliente ainda não possui pet cadastrado.</p>}
     {selectedCustomer && activePets.length === 1 && <div className="rounded-lg bg-slate-50 p-3 text-sm"><b>Pet:</b> {activePets[0].name}</div>}
-    {selectedCustomer && activePets.length > 1 && <label className="text-sm font-medium text-slate-700">Pet principal<select className="field mt-1" value={form.petId} onChange={(e) => { setForm({ ...form, petId: e.target.value }); setAddedPetIds([]); setOtherPetServiceIds({}); setOtherPetMembershipOptions({}); setOtherPetMembershipIds({}); }}>{activePets.map((pet) => <option key={pet.id} value={pet.id}>{pet.name}</option>)}</select></label>}
-    {selectedCustomer && activePets.length > 1 && addedPetIds.length < activePets.length - 1 && <button className="btn btn-secondary justify-self-start" type="button" onClick={addNextPet}>+ Pet</button>}
+    {selectedCustomer && activePets.length > 1 && <label className="text-sm font-medium text-slate-700">Pet principal<select className="field mt-1" value={form.petId} onChange={(e) => { setForm({ ...form, petId: e.target.value }); setAddedPetIds([]); setOtherPetServiceIds({}); setOtherPetMembershipOptions({}); setOtherPetMembershipIds({}); setPetPickerOpen(false); }}>{activePets.map((pet) => <option key={pet.id} value={pet.id}>{pet.name}</option>)}</select></label>}
+    {selectedCustomer && availableAdditionalPets.length > 0 && <button className="btn btn-secondary justify-self-start" type="button" onClick={() => setPetPickerOpen((open) => !open)}>+ Pet</button>}
+    {selectedCustomer && petPickerOpen && <section className="grid gap-3 rounded-lg border border-slate-300 bg-slate-50 p-3">
+      <div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-semibold text-slate-900">Escolha o próximo pet</h3><p className="text-sm text-slate-600">Apenas pets que ainda não estão neste agendamento aparecem aqui.</p></div><button className="btn btn-secondary" type="button" onClick={() => setPetPickerOpen(false)}>Fechar</button></div>
+      <div className="grid gap-2 sm:grid-cols-2">{availableAdditionalPets.map((pet) => <button className="rounded-lg border border-slate-200 bg-white p-3 text-left transition hover:border-blue-400 hover:bg-blue-50" key={pet.id} type="button" onClick={() => addPet(pet.id)}><b className="block text-slate-900">{pet.name}</b><span className="text-sm text-slate-600">Adicionar a este agendamento</span></button>)}</div>
+    </section>}
     {membershipsLoading && <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">Consultando mensalidades deste pet...</p>}
     {membershipsError && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{membershipsError}</p>}
     {!membershipsLoading && membershipOptions.length > 0 && <section className="grid gap-2">
@@ -1769,13 +1790,15 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
     </section>
     {addedPetIds.map((addedPetId) => {
       const addedPet = activePets.find((pet) => pet.id === addedPetId);
+      const petColorIndex = Math.max(0, activePets.findIndex((pet) => pet.id === addedPetId)) % additionalPetColorStyles.length;
+      const petColorStyle = additionalPetColorStyles[petColorIndex];
       const selectedIds = otherPetServiceIds[addedPetId] ?? [];
       const selectedServices = selectedIds.map((id) => services.find((service) => service.id === id)).filter((service): service is Service => Boolean(service));
       const petMemberships = (otherPetMembershipOptions[addedPetId] ?? []).filter((membership) => membership.usable);
       const selectedPetMembershipId = otherPetMembershipIds[addedPetId] ?? "";
       const selectedPetMembership = petMemberships.find((membership) => membership.id === selectedPetMembershipId);
-      return <section className="grid gap-2 rounded-lg border border-blue-200 bg-blue-50 p-4" key={addedPetId}>
-        <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold text-blue-950">Pet: {addedPet?.name}</h3><p className="text-sm text-blue-800">Os serviços deste pet entram no mesmo pedido.</p></div><button className="btn btn-secondary text-red-700" type="button" onClick={() => removeAddedPet(addedPetId)}>Remover pet</button></div>
+      return <section className={`grid gap-2 rounded-lg border p-4 ${petColorStyle.panel}`} key={addedPetId}>
+        <div className="flex items-center justify-between gap-3"><div><h3 className={`flex items-center gap-2 font-semibold ${petColorStyle.title}`}><span className={`h-2.5 w-2.5 rounded-full ${petColorStyle.dot}`} />Pet: {addedPet?.name}</h3><p className={`text-sm ${petColorStyle.description}`}>Os serviços deste pet entram no mesmo pedido.</p></div><button className="btn btn-secondary text-red-700" type="button" onClick={() => removeAddedPet(addedPetId)}>Remover pet</button></div>
         {!!petMemberships.length && <div className="grid gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm">
           <h4 className="font-semibold text-emerald-900">Pacote mensalista — {addedPet?.name}</h4>
           <select className="field" value={selectedPetMembershipId} onChange={(event) => { const membershipId = event.target.value; const coveredServiceId = petMemberships.find((membership) => membership.id === membershipId)?.plan.service.id; setOtherPetMembershipIds((current) => ({ ...current, [addedPetId]: membershipId })); if (coveredServiceId) setOtherPetServiceIds((current) => ({ ...current, [addedPetId]: (current[addedPetId] ?? []).filter((id) => id !== coveredServiceId) })); }}>
@@ -1789,7 +1812,7 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
           <option value="">Adicionar serviço avulso...</option>
           {services.filter((service) => !selectedIds.includes(service.id) && service.id !== selectedPetMembership?.plan.service.id).map((service) => <option key={service.id} value={service.id}>{service.name} — {currency(service.price)}</option>)}
         </select>
-        {!!selectedServices.length && <div className="grid gap-2">{selectedServices.map((service) => <div className="flex flex-col gap-3 rounded-lg border border-blue-100 bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between" key={service.id}><div><b>{service.name}</b><p className="text-slate-600">{servicePetSizeLabel(service.petSize)} · {serviceCoatLabel(service.coat)}</p><p className="font-semibold text-blue-800">{currency(service.price)}</p></div><button className="btn btn-secondary min-h-11 justify-center text-red-700" type="button" onClick={() => setOtherPetServiceIds((current) => ({ ...current, [addedPetId]: selectedIds.filter((id) => id !== service.id) }))}>Remover</button></div>)}</div>}
+        {!!selectedServices.length && <div className="grid gap-2">{selectedServices.map((service) => <div className={`flex flex-col gap-3 rounded-lg border bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between ${petColorStyle.item}`} key={service.id}><div><b>{service.name}</b><p className="text-slate-600">{servicePetSizeLabel(service.petSize)} · {serviceCoatLabel(service.coat)}</p><p className={`font-semibold ${petColorStyle.price}`}>{currency(service.price)}</p></div><button className="btn btn-secondary min-h-11 justify-center text-red-700" type="button" onClick={() => setOtherPetServiceIds((current) => ({ ...current, [addedPetId]: selectedIds.filter((id) => id !== service.id) }))}>Remover</button></div>)}</div>}
         {!selectedServices.length && !selectedPetMembership && <p className="text-sm text-amber-800">Escolha um pacote ou adicione ao menos um serviço para este pet.</p>}
       </section>;
     })}
