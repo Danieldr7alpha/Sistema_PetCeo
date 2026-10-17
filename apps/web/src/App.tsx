@@ -95,6 +95,9 @@ type FinancialPayable = { id: string; description: string; category: string; exp
 type FinancialReceivable = { id: string; expectedDate: string; status: "EXPECTED" | "RECEIVED"; installmentNumber: number; installments: number; grossAmount: number; feeAmount: number; netAmount: number; methodName: string; brand?: string | null; institution?: string | null; account?: { id: string; name: string; institutionName?: string | null } | null; saleCode?: number | null; receiptCode?: number | null; customerName?: string | null; nsu?: string | null };
 type FinancialMovement = { id: string; date: string; direction: "IN" | "OUT"; type: "RECEIPT" | "PAYABLE" | "CASH"; description: string; amount: number; grossAmount?: number; feeAmount?: number; account: string };
 type FinancialReport = { summary: { gross: number; fees: number; net: number; expenses: number; result: number; openPayables: number; openPayablesCount: number }; byPaymentMethod: { name: string; total: number }[]; byIncomeAccount: { name: string; total: number }[]; byExpenseCategory: { name: string; total: number }[]; byExpenseAccount: { name: string; total: number }[]; expenseDetails: { id: string; description: string; supplierName?: string | null; notes?: string | null; documentNumber?: string | null; category: string; amount: number; paidAt: string; paymentMethod?: string | null; accountName: string }[] };
+type FinancialOverviewHistoryItem = { id: string; date: string; direction: "IN" | "OUT"; amount: number; grossAmount?: number; feeAmount?: number; description: string; detail?: string };
+type FinancialOverviewHistory = { title: string; description: string; total: number; calculation: { label: string; value: number }[]; items: FinancialOverviewHistoryItem[]; emptyMessage: string };
+type FinancialHistoryTarget = { kind: "account"; account: FinancialAccount } | { kind: "payable" | "receivable" | "fees" };
 
 const genderLabels: Record<string, string> = { MALE: "Masculino", FEMALE: "Feminino", OTHER: "Outro", UNINFORMED: "Prefiro não informar" };
 const petStatusLabels: Record<string, string> = { ACTIVE: "Ativo", INACTIVE: "Inativo", DECEASED: "Falecido" };
@@ -4184,6 +4187,31 @@ function FinancialReports() {
   </Page>;
 }
 
+function FinancialOverviewHistoryModal({ target, onClose }: { target: FinancialHistoryTarget; onClose: () => void }) {
+  const query = target.kind === "account"
+    ? `/financial/overview/history?kind=account&accountId=${encodeURIComponent(target.account.id)}`
+    : `/financial/overview/history?kind=${target.kind}`;
+  const { data, loading } = useData<FinancialOverviewHistory>(query);
+  return <Modal title={data?.title ?? "Carregando histórico..."} onClose={onClose}>
+    {loading && !data && <p className="py-8 text-center text-sm text-slate-500">Carregando o detalhamento...</p>}
+    {data && <div className="grid gap-5">
+      <section className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <p className="text-sm text-slate-600">{data.description}</p>
+        <p className="mt-3 text-sm font-medium text-slate-600">Total exibido na visão geral</p>
+        <b className="text-2xl text-slate-950">{currency(data.total)}</b>
+      </section>
+      <section>
+        <h3 className="mb-2 text-sm font-semibold text-slate-800">Como o valor foi calculado</h3>
+        <div className="grid gap-2 sm:grid-cols-3">{data.calculation.map((item) => <div className="rounded-lg border border-slate-200 p-3" key={item.label}><p className="text-xs text-slate-500">{item.label}</p><b className={item.value < 0 ? "text-red-700" : "text-slate-900"}>{item.value < 0 ? "-" : ""}{currency(Math.abs(item.value))}</b></div>)}</div>
+      </section>
+      <section className="overflow-hidden rounded-xl border border-slate-200">
+        <div className="border-b border-slate-200 bg-slate-50 px-4 py-3"><h3 className="font-semibold">Lançamentos que compõem o total</h3><p className="mt-1 text-xs text-slate-500">Cada lançamento abaixo explica uma parcela do valor exibido.</p></div>
+        <div className="divide-y divide-slate-100">{data.items.map((item) => <div className="grid gap-2 p-4 sm:grid-cols-[1fr_auto] sm:items-center" key={item.id}><div><b>{item.description}</b><p className="mt-1 text-sm text-slate-600">{dateBR(item.date)}{item.detail ? ` · ${item.detail}` : ""}</p>{item.grossAmount !== undefined && <p className="mt-1 text-xs text-slate-500">Bruto: {currency(item.grossAmount)}{item.feeAmount ? ` · Taxa: ${currency(item.feeAmount)}` : ""}</p>}</div><b className={item.direction === "OUT" ? "text-red-700" : "text-emerald-700"}>{item.direction === "OUT" ? "-" : "+"}{currency(item.amount)}</b></div>)}{!data.items.length && <p className="p-8 text-center text-sm text-slate-500">{data.emptyMessage}</p>}</div>
+      </section>
+    </div>}
+  </Modal>;
+}
+
 function FinancialModule({ sectionPage }: { sectionPage: string }) {
   const { data: accounts, refresh: refreshAccounts } = useData<FinancialAccount[]>("/financial/accounts");
   const { data: methods, refresh: refreshMethods } = useData<FinancialPaymentMethod[]>("/financial/payment-methods");
@@ -4192,6 +4220,7 @@ function FinancialModule({ sectionPage }: { sectionPage: string }) {
   const [editingAccount, setEditingAccount] = useState<FinancialAccount | null>(null);
   const [methodOpen, setMethodOpen] = useState(false);
   const [editingMethod, setEditingMethod] = useState<FinancialPaymentMethod | null>(null);
+  const [historyTarget, setHistoryTarget] = useState<FinancialHistoryTarget | null>(null);
   const hasActiveBank = Boolean(accounts?.some((account) => account.active && account.type !== "CASH_DRAWER"));
   if (sectionPage === "financial:cash-registers") return <FinancialCashRegisters />;
   if (sectionPage === "financial:accounts") return <Page title="Bancos" action={<button className="btn btn-primary" onClick={() => { setEditingAccount(null); setAccountOpen(true); }}><Plus size={16} />Cadastrar banco</button>}>
@@ -4210,13 +4239,13 @@ function FinancialModule({ sectionPage }: { sectionPage: string }) {
   if (sectionPage === "financial:reports") return <FinancialReports />;
   if (sectionPage !== "financial") return <Page title="Financeiro"><div className="panel p-6"><h2 className="font-semibold">Disponível nas próximas fases</h2><p className="mt-2 text-sm text-slate-600">Esta área será ativada incrementalmente após a validação das contas, formas de recebimento, taxas e snapshots da Fase 1.</p></div></Page>;
   const bankAccounts = (accounts ?? []).filter((account) => account.type !== "CASH_DRAWER");
-  return <Page title="Financeiro — Visão geral"><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-    {bankAccounts.map((account) => <div className="rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-blue-100 p-5 shadow-sm" key={account.id}><p className="text-sm font-semibold text-blue-700">{account.institutionName || account.name}</p><p className="mt-1 text-xs text-blue-600">{account.name}</p><b className="mt-3 block text-2xl text-blue-950">{currency(account.calculatedBalance ?? account.openingBalance)}</b><p className="mt-1 text-xs text-blue-600">Valor disponível na conta</p></div>)}
+  return <Page title="Financeiro — Visão geral"><p className="mb-4 text-sm text-slate-600">Clique em um cartão para ver os lançamentos que formam o valor.</p><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    {bankAccounts.map((account) => <button type="button" className="rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-blue-100 p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2" key={account.id} onClick={() => setHistoryTarget({ kind: "account", account })} aria-label={`Ver histórico da conta ${account.name}`}><p className="text-sm font-semibold text-blue-700">{account.institutionName || account.name}</p><p className="mt-1 text-xs text-blue-600">{account.name}</p><b className="mt-3 block text-2xl text-blue-950">{currency(account.calculatedBalance ?? account.openingBalance)}</b><p className="mt-1 text-xs text-blue-600">Valor disponível na conta · Ver histórico</p></button>)}
     {!bankAccounts.length && <div className="rounded-xl border border-blue-200 bg-blue-50 p-5"><p className="font-semibold text-blue-800">Nenhum banco cadastrado</p><p className="mt-1 text-sm text-blue-600">Cadastre uma conta no submenu Bancos.</p></div>}
-    <div className="rounded-xl border border-red-200 bg-gradient-to-br from-red-50 to-rose-100 p-5 shadow-sm"><p className="text-sm font-semibold text-red-700">Contas a pagar</p><b className="mt-3 block text-2xl text-red-950">{currency(overview?.payable ?? 0)}</b><p className="mt-1 text-xs text-red-600">Total pendente</p></div>
-    <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-green-100 p-5 shadow-sm"><p className="text-sm font-semibold text-emerald-700">A receber</p><b className="mt-3 block text-2xl text-emerald-950">{currency(overview?.receivable ?? 0)}</b><p className="mt-1 text-xs text-emerald-600">Vendas pendentes e recebimentos futuros</p></div>
-    <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-yellow-100 p-5 shadow-sm"><p className="text-sm font-semibold text-amber-700">Taxas</p><b className="mt-3 block text-2xl text-amber-950">{currency(overview?.fees ?? 0)}</b><p className="mt-1 text-xs text-amber-600">Total descontado pelas operadoras</p></div>
-  </div></Page>;
+    <button type="button" className="rounded-xl border border-red-200 bg-gradient-to-br from-red-50 to-rose-100 p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2" onClick={() => setHistoryTarget({ kind: "payable" })}><p className="text-sm font-semibold text-red-700">Contas a pagar</p><b className="mt-3 block text-2xl text-red-950">{currency(overview?.payable ?? 0)}</b><p className="mt-1 text-xs text-red-600">Total pendente · Ver histórico</p></button>
+    <button type="button" className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-green-100 p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2" onClick={() => setHistoryTarget({ kind: "receivable" })}><p className="text-sm font-semibold text-emerald-700">A receber</p><b className="mt-3 block text-2xl text-emerald-950">{currency(overview?.receivable ?? 0)}</b><p className="mt-1 text-xs text-emerald-600">Vendas pendentes e recebimentos futuros · Ver histórico</p></button>
+    <button type="button" className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-yellow-100 p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2" onClick={() => setHistoryTarget({ kind: "fees" })}><p className="text-sm font-semibold text-amber-700">Taxas</p><b className="mt-3 block text-2xl text-amber-950">{currency(overview?.fees ?? 0)}</b><p className="mt-1 text-xs text-amber-600">Total descontado pelas operadoras · Ver histórico</p></button>
+  </div>{historyTarget && <FinancialOverviewHistoryModal target={historyTarget} onClose={() => setHistoryTarget(null)} />}</Page>;
 }
 
 const payableCategoryLabels: Record<string, string> = { RENT: "Aluguel", WATER: "Água", ELECTRICITY: "Energia elétrica", INTERNET_PHONE: "Internet e telefone", PAYROLL: "Salários e encargos", TAXES: "Impostos e taxas públicas", PRODUCT_PURCHASE: "Compra de produtos para revenda", GROOMING_SUPPLIES: "Insumos de banho e tosa", CLEANING_SUPPLIES: "Material de limpeza", MAINTENANCE: "Manutenção e equipamentos", MARKETING: "Marketing e publicidade", SOFTWARE: "Sistemas e assinaturas", BANK_FEES: "Tarifas bancárias", FREIGHT: "Fretes e entregas", PROFESSIONAL_SERVICES: "Serviços profissionais", OTHER: "Outras despesas" };

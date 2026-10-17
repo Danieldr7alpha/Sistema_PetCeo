@@ -151,6 +151,117 @@ financialRouter.get("/overview", async (req, res) => {
   res.json({ payable: Number(payable._sum.amount ?? 0), receivable, fees: Number(fees._sum.feeAmount ?? 0) });
 });
 
+financialRouter.get("/overview/history", async (req, res) => {
+  const cid = companyId(req);
+  const kind = String(req.query.kind ?? "");
+  const now = new Date();
+  const number = (value: unknown) => Number(value ?? 0);
+
+  if (kind === "account") {
+    const accountId = String(req.query.accountId ?? "");
+    const account = await prisma.financialAccount.findFirst({ where: { id: accountId, companyId: cid } });
+    if (!account) return res.status(404).json({ message: "Conta financeira não encontrada." });
+    const [legacyPayments, installments, paidPayables] = await Promise.all([
+      prisma.salePayment.findMany({
+        where: { companyId: cid, destinationAccountId: accountId, expectedSettlementDate: { lte: now }, settlementInstallments: { none: {} } },
+        select: { id: true, expectedSettlementDate: true, netAmount: true, grossAmount: true, feeAmount: true, paymentMethodNameSnapshot: true, method: true, sale: { select: { internalCode: true, customer: { select: { name: true } } } } }
+      }),
+      prisma.salePaymentInstallment.findMany({
+        where: { expectedSettlementDate: { lte: now }, salePayment: { companyId: cid, destinationAccountId: accountId } },
+        select: { id: true, installmentNumber: true, expectedSettlementDate: true, netAmount: true, grossAmount: true, feeAmount: true, salePayment: { select: { installments: true, paymentMethodNameSnapshot: true, method: true, sale: { select: { internalCode: true, customer: { select: { name: true } } } } } } }
+      }),
+      prisma.financialPayable.findMany({
+        where: { companyId: cid, status: "PAID", paidFromAccountId: accountId },
+        select: { id: true, description: true, paidAmount: true, paidAt: true, supplierName: true, category: true }
+      })
+    ]);
+    const incoming = [
+      ...legacyPayments.map((item) => ({ id: `payment-${item.id}`, date: item.expectedSettlementDate!, direction: "IN", amount: number(item.netAmount), grossAmount: number(item.grossAmount), feeAmount: number(item.feeAmount), description: `${item.paymentMethodNameSnapshot ?? item.method} · Venda ${item.sale.internalCode ?? "-"}`, detail: item.sale.customer?.name ?? "Cliente não informado" })),
+      ...installments.map((item) => ({ id: `installment-${item.id}`, date: item.expectedSettlementDate, direction: "IN", amount: number(item.netAmount), grossAmount: number(item.grossAmount), feeAmount: number(item.feeAmount), description: `${item.salePayment.paymentMethodNameSnapshot ?? item.salePayment.method} · Venda ${item.salePayment.sale.internalCode ?? "-"} · Parcela ${item.installmentNumber}/${item.salePayment.installments ?? 1}`, detail: item.salePayment.sale.customer?.name ?? "Cliente não informado" }))
+    ];
+    const outgoing = paidPayables.map((item) => ({ id: `payable-${item.id}`, date: item.paidAt!, direction: "OUT", amount: number(item.paidAmount), description: item.description, detail: `${item.supplierName ? `${item.supplierName} · ` : ""}${payableCategories.includes(item.category as typeof payableCategories[number]) ? item.category : "Despesa"}` }));
+    const totalIncoming = incoming.reduce((sum, item) => sum + item.amount, 0);
+    const totalOutgoing = outgoing.reduce((sum, item) => sum + item.amount, 0);
+    return res.json({
+      title: `Histórico da conta — ${account.name}`,
+      description: "O saldo disponível considera o saldo inicial, os recebimentos que já deveriam ter entrado e as despesas pagas por esta conta.",
+      total: number(account.openingBalance) + totalIncoming - totalOutgoing,
+      calculation: [{ label: "Saldo inicial", value: number(account.openingBalance) }, { label: "Recebimentos", value: totalIncoming }, { label: "Despesas pagas", value: -totalOutgoing }],
+      items: [...incoming, ...outgoing].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+      emptyMessage: "Ainda não há recebimentos ou despesas registradas para esta conta."
+    });
+  }
+
+  if (kind === "payable") {
+    const items = await prisma.financialPayable.findMany({
+      where: { companyId: cid, status: "OPEN" },
+      select: { id: true, description: true, amount: true, dueDate: true, supplierName: true, category: true, installmentNumber: true, installmentTotal: true },
+      orderBy: { dueDate: "asc" }
+    });
+    const total = items.reduce((sum, item) => sum + number(item.amount), 0);
+    return res.json({
+      title: "Histórico — Contas a pagar",
+      description: "Este total reúne todas as contas que ainda estão em aberto.",
+      total,
+      calculation: [{ label: "Contas em aberto", value: total }],
+      items: items.map((item) => ({ id: item.id, date: item.dueDate, direction: "OUT", amount: number(item.amount), description: item.description, detail: `${item.supplierName ? `${item.supplierName} · ` : ""}${item.category} · Vencimento${item.installmentTotal > 1 ? ` · Parcela ${item.installmentNumber}/${item.installmentTotal}` : ""}` })),
+      emptyMessage: "Não há contas em aberto."
+    });
+  }
+
+  if (kind === "receivable") {
+    const [installments, legacyPayments, pendingSales] = await Promise.all([
+      prisma.salePaymentInstallment.findMany({
+        where: { expectedSettlementDate: { gt: now }, salePayment: { companyId: cid } },
+        select: { id: true, expectedSettlementDate: true, installmentNumber: true, netAmount: true, grossAmount: true, feeAmount: true, salePayment: { select: { installments: true, paymentMethodNameSnapshot: true, method: true, destinationAccount: { select: { name: true } }, sale: { select: { internalCode: true, customer: { select: { name: true } } } } } } }
+      }),
+      prisma.salePayment.findMany({
+        where: { companyId: cid, expectedSettlementDate: { gt: now }, settlementInstallments: { none: {} } },
+        select: { id: true, expectedSettlementDate: true, netAmount: true, grossAmount: true, feeAmount: true, paymentMethodNameSnapshot: true, method: true, destinationAccount: { select: { name: true } }, sale: { select: { internalCode: true, customer: { select: { name: true } } } } }
+      }),
+      prisma.sale.findMany({
+        where: { companyId: cid, status: { in: ["PENDING", "PARTIALLY_PAID"] } },
+        select: { id: true, internalCode: true, pendingAmount: true, expectedPaymentDate: true, pendingReason: true, customer: { select: { name: true } } }
+      })
+    ]);
+    const scheduled = [
+      ...installments.map((item) => ({ id: `installment-${item.id}`, date: item.expectedSettlementDate, direction: "IN", amount: number(item.netAmount), grossAmount: number(item.grossAmount), feeAmount: number(item.feeAmount), description: `${item.salePayment.paymentMethodNameSnapshot ?? item.salePayment.method} · Venda ${item.salePayment.sale.internalCode ?? "-"} · Parcela ${item.installmentNumber}/${item.salePayment.installments ?? 1}`, detail: `${item.salePayment.sale.customer?.name ?? "Cliente não informado"} · Previsão no banco: ${item.salePayment.destinationAccount?.name ?? "Não informado"}` })),
+      ...legacyPayments.map((item) => ({ id: `payment-${item.id}`, date: item.expectedSettlementDate!, direction: "IN", amount: number(item.netAmount), grossAmount: number(item.grossAmount), feeAmount: number(item.feeAmount), description: `${item.paymentMethodNameSnapshot ?? item.method} · Venda ${item.sale.internalCode ?? "-"}`, detail: `${item.sale.customer?.name ?? "Cliente não informado"} · Previsão no banco: ${item.destinationAccount?.name ?? "Não informado"}` }))
+    ];
+    const pending = pendingSales.map((item) => ({ id: `sale-${item.id}`, date: item.expectedPaymentDate ?? now, direction: "IN", amount: number(item.pendingAmount), description: `Venda pendente ${item.internalCode ?? "-"}`, detail: `${item.customer?.name ?? "Cliente não informado"}${item.pendingReason ? ` · ${item.pendingReason}` : ""}` }));
+    const scheduledTotal = scheduled.reduce((sum, item) => sum + item.amount, 0);
+    const pendingTotal = pending.reduce((sum, item) => sum + item.amount, 0);
+    return res.json({
+      title: "Histórico — A receber",
+      description: "O total soma as parcelas que ainda entrarão no banco e as vendas que o cliente ainda precisa pagar.",
+      total: scheduledTotal + pendingTotal,
+      calculation: [{ label: "Recebimentos futuros", value: scheduledTotal }, { label: "Vendas pendentes", value: pendingTotal }],
+      items: [...scheduled, ...pending].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
+      emptyMessage: "Não há recebimentos futuros nem vendas pendentes."
+    });
+  }
+
+  if (kind === "fees") {
+    const payments = await prisma.salePayment.findMany({
+      where: { companyId: cid },
+      select: { id: true, paidAt: true, feeAmount: true, grossAmount: true, netAmount: true, paymentMethodNameSnapshot: true, method: true, cardBrandSnapshot: true, sale: { select: { internalCode: true, customer: { select: { name: true } } } } },
+      orderBy: { paidAt: "desc" }
+    });
+    const total = payments.reduce((sum, item) => sum + number(item.feeAmount), 0);
+    const items = payments.filter((item) => number(item.feeAmount) !== 0).map((item) => ({ id: item.id, date: item.paidAt, direction: "OUT", amount: number(item.feeAmount), grossAmount: number(item.grossAmount), feeAmount: number(item.feeAmount), description: `${item.paymentMethodNameSnapshot ?? item.method} · Venda ${item.sale.internalCode ?? "-"}`, detail: `${item.sale.customer?.name ?? "Cliente não informado"}${item.cardBrandSnapshot ? ` · ${item.cardBrandSnapshot}` : ""} · Valor líquido: ${number(item.netAmount).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}` }));
+    return res.json({
+      title: "Histórico — Taxas",
+      description: "São as taxas registradas em cada pagamento, descontadas pelas operadoras ou instituições financeiras.",
+      total,
+      calculation: [{ label: "Taxas dos pagamentos", value: total }],
+      items,
+      emptyMessage: "Não há taxas registradas nos pagamentos."
+    });
+  }
+
+  return res.status(400).json({ message: "Tipo de histórico financeiro inválido." });
+});
+
 function financialPeriod(req: any, defaultFutureDays = 30) {
   const start = typeof req.query.from === "string" ? payableDate(req.query.from) : new Date();
   start.setHours(0, 0, 0, 0);
