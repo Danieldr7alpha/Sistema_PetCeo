@@ -1792,7 +1792,8 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
         const available = membership.availableUses ?? membership.remainingUses;
         const reserved = membership.reservedUses ?? 0;
         const expired = membership.unavailableReason === "EXPIRED";
-        return <div className={`rounded-lg border p-4 text-sm ${selected ? "border-emerald-500 bg-emerald-50" : membership.usable ? "border-emerald-200 bg-emerald-50/50" : "border-amber-200 bg-amber-50"}`} key={membership.id}>
+        const allUsesReserved = !expired && membership.status === "ACTIVE" && available === 0 && reserved > 0;
+        return <div className={`rounded-lg border p-4 text-sm ${selected ? "border-emerald-500 bg-emerald-50" : membership.usable ? "border-emerald-200 bg-emerald-50/50" : allUsesReserved ? "border-blue-200 bg-blue-50" : "border-amber-200 bg-amber-50"}`} key={membership.id}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="grid gap-1">
               <b>{membership.plan.name}</b>
@@ -1800,15 +1801,16 @@ function AppointmentForm({ services, initialDate, initialTime, onCreateCustomer,
               <p className="text-base font-semibold">Disponível: {available} de {membership.totalUses} usos</p>
               <p>{available} disponíveis{reserved > 0 ? ` • ${reserved} reservado${reserved === 1 ? "" : "s"}` : ""}</p>
               <p>Válido até {dateBR(membership.endDate)}</p>
-              <p>Status: {expired ? "Vencida" : membership.unavailableReason === "PENDING_PAYMENT" ? "Aguardando pagamento" : membership.unavailableReason === "INACTIVE" ? "Inativa" : membership.unavailableReason === "NO_BALANCE" ? "Sem saldo" : "Ativa"}</p>
+              <p>Status: {expired ? "Vencida" : membership.unavailableReason === "PENDING_PAYMENT" ? "Aguardando pagamento" : membership.unavailableReason === "INACTIVE" ? "Inativa" : allUsesReserved ? "Ativa — todos os usos já agendados" : membership.unavailableReason === "NO_BALANCE" ? "Sem saldo" : "Ativa"}</p>
               {expired && <p className="font-medium text-amber-900">Mensalidade vencida em {dateBR(membership.endDate)}.</p>}
               {membership.unavailableReason === "PENDING_PAYMENT" && <p className="font-medium text-amber-900">Esta mensalidade ainda não foi paga e não possui saldo liberado.</p>}
-              {!expired && !membership.usable && <p className="font-medium text-amber-900">Este pet não possui utilizações disponíveis. Renove a mensalidade para usar o pacote.</p>}
+              {allUsesReserved && <p className="font-medium text-blue-900">Este pacote está ativo, mas as {reserved} utilizaç{reserved === 1 ? "ão já está reservada" : "ões já estão reservadas"} em agendamentos futuros. Para outro horário, reagende ou cancele um desses atendimentos.</p>}
+              {!expired && !membership.usable && !allUsesReserved && <p className="font-medium text-amber-900">Este pet não possui utilizações disponíveis. Renove a mensalidade para usar o pacote.</p>}
             </div>
             <div className="grid shrink-0 gap-2">
               {membership.usable && selected && paymentMode === "PACKAGE" ? <button className="btn btn-secondary min-h-11 justify-center text-red-700" type="button" onClick={removePackage}>Remover pacote</button> : membership.usable && <button className="btn btn-secondary min-h-11 justify-center" type="button" onClick={() => selectPackage(membership, "PACKAGE")}>Usar pacote</button>}
-              {!membership.usable && <button className="btn btn-secondary min-h-11 justify-center" type="button" onClick={onRenewMembership}>Renovar agora</button>}
-              {!membership.usable && selected && paymentMode === "RENEWAL_AT_CHECKOUT" ? <button className="btn btn-secondary min-h-11 justify-center text-red-700" type="button" onClick={removePackage}>Remover renovação</button> : !membership.usable && <button className="btn btn-secondary min-h-11 justify-center" type="button" onClick={() => selectPackage(membership, "RENEWAL_AT_CHECKOUT")}>Cobrar renovação ao finalizar</button>}
+              {!membership.usable && !allUsesReserved && <button className="btn btn-secondary min-h-11 justify-center" type="button" onClick={onRenewMembership}>Renovar agora</button>}
+              {!membership.usable && !allUsesReserved && (selected && paymentMode === "RENEWAL_AT_CHECKOUT" ? <button className="btn btn-secondary min-h-11 justify-center text-red-700" type="button" onClick={removePackage}>Remover renovação</button> : <button className="btn btn-secondary min-h-11 justify-center" type="button" onClick={() => selectPackage(membership, "RENEWAL_AT_CHECKOUT")}>Cobrar renovação ao finalizar</button>)}
             </div>
           </div>
         </div>;
