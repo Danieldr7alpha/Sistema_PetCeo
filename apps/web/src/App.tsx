@@ -76,7 +76,8 @@ type CashSession = { id: string; internalCode?: number; cashRegisterId?: string 
 type CashCurrent = { session: CashSession | null; hasPreviousSession: boolean; openingBalance: number };
 type CashSummary = { session: CashSession; sales: Sale[]; totalsByMethod: Record<PaymentMethod, number>; pendingTotal: number; cancelledTotal: number; discountsTotal: number; cashIn: number; cashOut: number; totalReceived: number; expectedCash: number };
 type CashPaymentDetail = { id: string; method: PaymentMethod; amount: number; cardBrand?: string | null; cardNsu?: string | null; installments?: number | null; pixReference?: string | null; cashReceived?: number | null; changeAmount?: number | null; paidAt: string; saleCode?: number | null; receiptCode?: number | null; customerName: string; petName?: string | null; operatorName: string };
-type CashReport = { sessions: CashSession[]; totalsByMethod: Record<PaymentMethod, number>; totalReceived: number; pendingTotal: number; cancelledTotal: number; refundedTotal: number; discountsTotal: number; paymentDetails: CashPaymentDetail[]; refundDetails: { id: string; saleCode?: number | null; customerName: string; petName?: string | null; amount: number; reason?: string | null; refundedAt: string; operatorName?: string | null }[]; byOperator: { name: string; total: number }[]; byService: { name: string; total: number }[]; byProduct: { name: string; total: number }[]; byHour: { hour: string; total: number }[] };
+type CashPendingDetail = { id: string; saleCode?: number | null; customerName: string; petName?: string | null; amount: number; createdAt: string; status: "PENDING" | "PARTIALLY_PAID" };
+type CashReport = { sessions: CashSession[]; totalsByMethod: Record<PaymentMethod, number>; totalReceived: number; pendingTotal: number; pendingDetails: CashPendingDetail[]; cancelledTotal: number; refundedTotal: number; discountsTotal: number; paymentDetails: CashPaymentDetail[]; refundDetails: { id: string; saleCode?: number | null; customerName: string; petName?: string | null; amount: number; reason?: string | null; refundedAt: string; operatorName?: string | null }[]; byOperator: { name: string; total: number }[]; byService: { name: string; total: number }[]; byProduct: { name: string; total: number }[]; byHour: { hour: string; total: number }[] };
 type PreSaleStatus = "OPEN" | "CONVERTED" | "EXPIRED" | "CANCELLED";
 type PreSaleItem = SaleItem & { preSaleId?: string };
 type PreSale = { id: string; internalCode?: number; customer?: Customer | null; pet?: Pet | null; operatorName?: string | null; status: PreSaleStatus; expiresAt?: string | null; subtotal: number | string; discount: number | string; total: number | string; notes?: string | null; convertedSaleId?: string | null; createdAt: string; items: PreSaleItem[] };
@@ -3653,6 +3654,7 @@ function CashReports({ isAdmin, cashSession, closingReport = false, onDismiss }:
   const { data, loading, refreshing } = useData<CashReport>(isAdmin ? `/cash/reports/summary?${reportParams}` : "", [isAdmin, period, customFrom, customTo, cashSession?.id]);
   const reportData = loading || refreshing ? null : data;
   const paymentDetails = reportData?.paymentDetails ?? [];
+  const pendingDetails = reportData?.pendingDetails ?? [];
   const paymentGroups = [...paymentDetails.reduce((groups, payment) => {
     const isCard = payment.method === "DEBIT" || payment.method === "CREDIT";
     const brand = payment.cardBrand?.trim() || "Sem bandeira";
@@ -3682,7 +3684,7 @@ function CashReports({ isAdmin, cashSession, closingReport = false, onDismiss }:
     {(loading || refreshing) && <div className="panel p-5 text-sm text-slate-600">Atualizando o relatório do período selecionado...</div>}
     {!loading && !refreshing && !closingReport && (reportData?.sessions ?? []).length > 0 && <div className="panel flex flex-wrap gap-x-6 gap-y-2 p-4 text-sm">{(reportData?.sessions ?? []).map((item) => <p key={item.id}><b>Relatório:</b> {closingReportCode(item)} · <b>Caixa:</b> {cashSessionCode(item)}</p>)}</div>}
     {!loading && !refreshing && <>{(reportData?.sessions ?? []).map((reportSession) => <div className="panel grid gap-2 p-4 text-sm md:grid-cols-4" key={reportSession.id}><p><b>Caixa:</b> {cashSessionCode(reportSession)}</p><p><b>Abertura:</b> {dateTimeBR(reportSession.openedAt)}</p><p><b>Fechamento:</b> {reportSession.closedAt ? dateTimeBR(reportSession.closedAt) : "Em operação"}</p><p><b>Operador:</b> {reportSession.openedByName ?? "-"}</p><p><b>Valor inicial:</b> {currency(reportSession.openingAmount)}</p>{reportSession.closedAt && <><p><b>Dinheiro esperado:</b> {currency(reportSession.expectedCashAmount ?? 0)}</p><p><b>Dinheiro contado:</b> {currency(reportSession.closingCashAmount ?? 0)}</p><p><b>Diferença:</b> {currency(reportSession.difference ?? 0)}</p></>}</div>)}<div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">{summaryCards.map((card) => <div className="panel min-w-0 p-4" key={card.label}><p className="text-sm font-medium text-slate-500">{card.label}</p><b className="mt-1 block whitespace-nowrap text-lg">{currency(card.value)}</b></div>)}</div>
-    {paymentGroups.length > 0 && <div className="grid gap-4 lg:grid-cols-2">{paymentGroups.map((group) => <PaymentReportGroup key={group.key} title={group.title} method={group.method} payments={group.payments} />)}</div>}
+    {(paymentGroups.length > 0 || pendingDetails.length > 0) && <div className="grid gap-4 lg:grid-cols-2">{paymentGroups.map((group) => <PaymentReportGroup key={group.key} title={group.title} method={group.method} payments={group.payments} />)}{pendingDetails.length > 0 && <PendingReportGroup pendingSales={pendingDetails} />}</div>}
     {(reportData?.refundDetails ?? []).length > 0 && <section className="panel overflow-hidden"><div className="border-b border-red-200 bg-red-50 p-3"><h3 className="font-semibold text-red-900">Estornos realizados</h3></div><div className="divide-y divide-slate-100">{reportData!.refundDetails.map((refund) => <div className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm" key={refund.id}><p><b>{dateTimeBR(refund.refundedAt)}</b> | <b>PD-{String(refund.saleCode ?? 0).padStart(6, "0")}</b> | {refund.customerName}{refund.petName ? ` | ${refund.petName}` : ""} | Motivo: {refund.reason ?? "-"} | Operador: {refund.operatorName ?? "-"}</p><b className="text-red-700">-{currency(refund.amount)}</b></div>)}</div></section>}</>}
     {!loading && !refreshing && (reportData?.sessions ?? []).some((item) => item.movements?.length) && <section className="panel overflow-hidden"><div className="border-b border-slate-200 bg-slate-50 p-3"><h3 className="font-semibold">Movimentações do caixa</h3></div><div className="divide-y divide-slate-100">{(reportData?.sessions ?? []).flatMap((item) => item.movements ?? []).map((movement) => <div className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm" key={movement.id}><p><b>{dateTimeBR(movement.createdAt)}</b> | {cashMovementLabels[movement.type]} | {movement.reason}{movement.operatorName ? ` | ${movement.operatorName}` : ""}</p><b>{currency(movement.amount)}</b></div>)}</div></section>}
   </div>;
@@ -3696,6 +3698,19 @@ function PaymentReportGroup({ title, method, payments }: { title: string; method
       {payments.map((payment) => <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 p-3 text-sm" key={payment.id}>
         <p><b>{timeBR(payment.paidAt)}</b> | <b>{payment.receiptCode ? `CV-${String(payment.receiptCode).padStart(6, "0")}` : `PD-${String(payment.saleCode ?? 0).padStart(5, "0")}`}</b> | {payment.customerName}{payment.petName ? ` | ${payment.petName}` : ""}{(method === "DEBIT" || method === "CREDIT") ? ` | NSU: ${payment.cardNsu ?? "-"}${method === "CREDIT" ? ` | Parcelado: ${payment.installments ?? 1}x` : ""}` : ""}{method === "PIX" ? ` | Comprovante: ${payment.pixReference ?? payment.cardNsu ?? "-"}` : ""}{method === "CASH" ? ` | Recebido: ${currency(payment.cashReceived ?? payment.amount)} | Troco: ${currency(payment.changeAmount ?? 0)}` : ""}</p>
         <b className="whitespace-nowrap">{currency(payment.amount)}</b>
+      </div>)}
+    </div>
+  </section>;
+}
+
+function PendingReportGroup({ pendingSales }: { pendingSales: CashPendingDetail[] }) {
+  const total = pendingSales.reduce((sum, sale) => sum + sale.amount, 0);
+  return <section className="panel overflow-hidden border-amber-200">
+    <div className="flex items-center justify-between border-b border-amber-200 bg-amber-50 p-3"><div><h3 className="font-semibold text-amber-950">A receber</h3><p className="text-xs text-amber-800">{pendingSales.length} pedido(s) aguardando pagamento</p></div><b className="text-amber-950">{currency(total)}</b></div>
+    <div className="divide-y divide-slate-100">
+      {pendingSales.map((sale) => <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 p-3 text-sm" key={sale.id}>
+        <p><b>{timeBR(sale.createdAt)}</b> | <b>PD-{String(sale.saleCode ?? 0).padStart(6, "0")}</b> | {sale.customerName}{sale.petName ? ` | ${sale.petName}` : ""} | {sale.status === "PARTIALLY_PAID" ? "Saldo pendente" : "Pagar depois"}</p>
+        <b className="whitespace-nowrap text-amber-800">{currency(sale.amount)}</b>
       </div>)}
     </div>
   </section>;

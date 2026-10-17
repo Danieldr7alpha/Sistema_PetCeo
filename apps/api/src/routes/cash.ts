@@ -245,7 +245,17 @@ async function cashReportSummary(req: Request, res: import("express").Response) 
       status: { in: ["PENDING", "PARTIALLY_PAID"] },
       createdAt: { gte: pendingRange.from, lte: pendingRange.to }
     },
-    select: { pendingAmount: true, total: true }
+    select: {
+      id: true,
+      internalCode: true,
+      pendingAmount: true,
+      total: true,
+      createdAt: true,
+      status: true,
+      customer: { select: { name: true } },
+      pet: { select: { name: true } }
+    },
+    orderBy: { createdAt: "asc" }
   });
   const totalsByMethod = Object.fromEntries(paymentMethods.map((method) => [method, 0])) as Record<typeof paymentMethods[number], number>;
   const byOperator = new Map<string, number>();
@@ -285,6 +295,15 @@ async function cashReportSummary(req: Request, res: import("express").Response) 
     totalsByMethod,
     totalReceived: Object.values(totalsByMethod).reduce((sum, value) => sum + value, 0),
     pendingTotal,
+    pendingDetails: pendingSales.map((sale) => ({
+      id: sale.id,
+      saleCode: sale.internalCode,
+      customerName: sale.customer?.name ?? "Consumidor final",
+      petName: sale.pet?.name ?? null,
+      amount: Number(sale.pendingAmount || sale.total),
+      createdAt: sale.createdAt,
+      status: sale.status
+    })),
     cancelledTotal,
     refundedTotal: refundedSales.reduce((sum, sale) => sum + Number(sale.paidAmount), 0),
     discountsTotal,
