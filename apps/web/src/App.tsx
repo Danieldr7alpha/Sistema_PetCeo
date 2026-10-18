@@ -2814,7 +2814,7 @@ function CashPointOfSaleLayout({ cashSession, query, setQuery, loadedSale, waiti
     {clientModalOpen && <Modal title="Selecionar cliente" onClose={() => setClientModalOpen(false)}><div className="grid gap-3"><div className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2"><Search size={18} className="text-slate-500" /><input className="w-full bg-transparent text-sm outline-none" autoFocus placeholder="Buscar por código, nome, CPF, celular ou pet" value={clientQuery} onChange={(event) => setClientQuery(event.target.value)} /></div><div className="max-h-[60vh] overflow-y-auto rounded-lg border border-slate-200">{clientResults.map((customer) => <button className="block w-full border-b border-slate-100 p-3 text-left text-sm hover:bg-slate-50" key={customer.id} type="button" onClick={() => { setSelectedCustomer(customer); const pet = customer.pets.find((item) => item.id === customer.matchedPetId) ?? customer.pets.find((item) => item.status === "ACTIVE") ?? null; setSelectedPetId(pet?.id ?? ""); setQuery(`${customerCode(customer)} ${customer.name}`); setClientModalOpen(false); }}><b>{customerCode(customer)} - {customer.name}</b>{customer.matchedPetName && <p className="text-blue-700">Pet encontrado: {customer.matchedPetName}</p>}<p className="text-slate-600">CPF: {formatCpf(customer.cpf)} · Celular: {formatPhone(customer.phone)}</p><p className="text-slate-600">Pets: {customer.pets.map((pet) => pet.name).join(", ") || "-"}</p></button>)}{clientQuery.trim().length < 2 && <p className="p-4 text-sm text-slate-500">Digite ao menos 2 caracteres para buscar.</p>}{clientQuery.trim().length >= 2 && !clientResults.length && <p className="p-4 text-sm text-slate-500">Nenhum cliente encontrado.</p>}</div>{selectedCustomer && <button className="btn btn-secondary justify-self-start" type="button" onClick={() => { setSelectedCustomer(null); setSelectedPetId(""); setQuery(""); setClientModalOpen(false); }}>Limpar cliente</button>}</div></Modal>}
     {discountModalOpen && <DiscountModal subtotal={cartTotal} currentType={discountType} currentCents={discountCents} currentPercent={discountPercent} onClose={() => setDiscountModalOpen(false)} onRemove={() => { setDiscountType("VALUE"); setDiscountCents("0"); setDiscountPercent(""); setDiscountModalOpen(false); }} onApply={(nextType, nextCents, nextPercent) => { setDiscountType(nextType); setDiscountCents(nextCents); setDiscountPercent(nextPercent); setDiscountModalOpen(false); }} />}
     {paymentModalOpen && <PaymentModal sale={loadedSale} customer={currentCustomer ?? null} pet={currentPet ?? null} total={orderTotal} paidBefore={paidBefore} existingPayments={existingPaymentPayload()} onSelectCustomer={openCustomerFromDeferredFlow} onClose={() => setPaymentModalOpen(false)} onConfirm={(payload) => saveCurrentOrder(payload)} />}
-    {payLaterModalOpen && <PayLaterModal sale={loadedSale} customer={currentCustomer ?? null} pet={currentPet ?? null} total={orderTotal} paidBefore={paidBefore} pendingAmount={currentPendingAmount} onSelectCustomer={openCustomerFromDeferredFlow} onClose={() => setPayLaterModalOpen(false)} onConfirm={(pendingReason, pendingNotes, expectedPaymentDate) => saveCurrentOrder({ status: "PENDING", payments: existingPaymentPayload(), paymentMethod: existingPaymentPayload()[0]?.method, pendingReason, pendingNotes, expectedPaymentDate })} />}
+    {payLaterModalOpen && <PayLaterModal sale={loadedSale} customer={currentCustomer ?? null} pet={currentPet ?? null} total={orderTotal} paidBefore={paidBefore} pendingAmount={currentPendingAmount} onSelectCustomer={openCustomerFromDeferredFlow} onClose={() => setPayLaterModalOpen(false)} onConfirm={(pendingReason, pendingNotes, expectedPaymentDate, adminEmail, adminPassword) => saveCurrentOrder({ status: "PENDING", payments: existingPaymentPayload(), paymentMethod: existingPaymentPayload()[0]?.method, pendingReason, pendingNotes, expectedPaymentDate, adminEmail, adminPassword })} />}
     {petModalOpen && <Modal title="Selecionar pet" onClose={() => setPetModalOpen(false)}><div className="grid gap-3"><div className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2"><Search size={18} className="text-slate-500" /><input className="w-full bg-transparent text-sm outline-none" autoFocus placeholder="Pesquisar pet por nome..." value={petQuery} onChange={(event) => setPetQuery(event.target.value)} /></div><div className="max-h-[60vh] overflow-y-auto rounded-lg border border-slate-200">{filteredPets.map((pet) => <button className="block w-full border-b border-slate-100 p-3 text-left text-sm hover:bg-slate-50" key={pet.id} type="button" onClick={() => { setSelectedPetId(pet.id); setPetQuery(""); setPetModalOpen(false); }}><b>{pet.name}</b><p className="text-slate-600">Espécie: {pet.customSpecies || pet.species} · Raça: {pet.breed || "-"}</p></button>)}{!selectedCustomer && <p className="p-4 text-sm text-slate-500">Selecione um cliente antes de buscar o pet.</p>}{selectedCustomer && !filteredPets.length && <p className="p-4 text-sm text-slate-500">Nenhum pet encontrado para este cliente.</p>}</div></div></Modal>}
     {itemOpen && <Modal title="Buscar produto ou serviço" onClose={() => setItemOpen(false)}><div className="grid gap-3"><input className="field" autoFocus placeholder="Código, nome, SKU ou categoria" value={itemQuery} onChange={(event) => setItemQuery(event.target.value)} /><div className="max-h-[60vh] overflow-y-auto rounded-lg border border-slate-200">{catalogItems.map((item) => <button className="block w-full border-b border-slate-100 p-3 text-left text-sm hover:bg-slate-50" key={`${item.type}-${item.id}`} type="button" onClick={() => addCatalogItem(item)}><b>{item.code} — {item.name}</b><p className="text-slate-600">{item.type === "SERVICE" ? "Serviço" : "Produto"} · {item.meta}</p><p className="font-semibold text-blue-700">{currency(item.price)}</p></button>)}{!catalogItems.length && <p className="p-4 text-sm text-slate-500">Nenhum produto ou serviço encontrado.</p>}</div></div></Modal>}
     {orderNotice && <Modal title={orderNotice.title} onClose={closeOrderNotice}>
@@ -3003,6 +3003,8 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
   const [pendingReason, setPendingReason] = useState("PARTIAL_PAYMENT");
   const [pendingNotes, setPendingNotes] = useState("");
   const [expectedDate, setExpectedDate] = useState("");
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
@@ -3118,11 +3120,15 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
       setErrors({ form: "Informe a observação obrigatória." });
       return;
     }
+    if (!adminEmail.trim() || !adminPassword) {
+      setErrors({ form: "Informe o e-mail e a senha do dono ou administrador para liberar o pagamento parcial." });
+      return;
+    }
     if (!validateRows(false) || remaining <= 0.01 || saving) return;
     setSaving(true);
     try {
       const payments = [...existingPayments, ...paymentPayload()];
-      await onConfirm({ status: "PARTIALLY_PAID", paymentMethod: payments[0]?.method, payments, pendingReason, pendingNotes: buildPendingNotes(pendingNotes, expectedDate), expectedPaymentDate: expectedDate || undefined });
+      await onConfirm({ status: "PARTIALLY_PAID", paymentMethod: payments[0]?.method, payments, pendingReason, pendingNotes: buildPendingNotes(pendingNotes, expectedDate), expectedPaymentDate: expectedDate || undefined, adminEmail, adminPassword });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Falha ao registrar pagamento parcial.");
       setSaving(false);
@@ -3181,13 +3187,15 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
       </div>
       {remaining > 0.01 && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
         <p><b>Restam {currency(remaining)} a receber.</b></p>
-        <div className="mt-3 flex flex-wrap gap-2"><button className="btn btn-secondary" type="button" onClick={addRow}>Adicionar outra forma de pagamento</button><button className="btn btn-secondary" type="button" onClick={() => setPartialOpen(true)}>Registrar saldo restante para pagar depois</button></div>
+        <div className="mt-3 flex flex-wrap gap-2"><button className="btn btn-secondary" type="button" onClick={addRow}>Adicionar outra forma de pagamento</button><button className="btn btn-secondary" type="button" onClick={() => setPartialOpen(true)}>Deixar saldo para receber depois</button></div>
       </div>}
       {partialOpen && <div className="grid gap-3 rounded-lg border border-amber-200 p-3">
+        <p className="text-sm font-medium text-amber-950">Autorização do dono necessária para deixar {currency(remaining)} pendente.</p>
         {!customer?.id && <div className="rounded-md bg-red-50 p-3 text-sm text-red-700"><p>Para registrar um pagamento para depois, é necessário vincular um cliente ao pedido.</p><button className="btn btn-secondary mt-2" type="button" onClick={onSelectCustomer}>Selecionar cliente</button></div>}
         <select className="field" value={pendingReason} onChange={(event) => setPendingReason(event.target.value)}>{Object.entries(pendingReasonLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
         <textarea className="field" placeholder="Observação obrigatória" value={pendingNotes} onChange={(event) => setPendingNotes(event.target.value)} />
         <label className="text-sm font-medium">Data prevista de pagamento<input className="field mt-1" type="date" value={expectedDate} onChange={(event) => setExpectedDate(event.target.value)} /></label>
+        <fieldset className="rounded-lg border border-slate-200 p-3"><legend className="px-1 text-sm font-semibold">Liberação do dono</legend><p className="mb-3 text-sm text-slate-600">Informe o e-mail e a senha do dono ou administrador para autorizar o saldo pendente.</p><div className="grid gap-3 sm:grid-cols-2"><label className="text-sm font-semibold">E-mail do dono<input className="field mt-1" type="email" autoComplete="username" value={adminEmail} onChange={(event) => setAdminEmail(event.target.value)} /></label><label className="text-sm font-semibold">Senha<input className="field mt-1" type="password" autoComplete="current-password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} /></label></div></fieldset>
       </div>}
       {errors.form && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{errors.form}</p>}
       {message && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{message}</p>}
@@ -3199,10 +3207,12 @@ function PaymentModal({ sale, customer, pet, total, paidBefore, existingPayments
   </Modal>;
 }
 
-function PayLaterModal({ sale, customer, pet, total, paidBefore, pendingAmount, onSelectCustomer, onClose, onConfirm }: { sale: Sale | null; customer: Customer | null; pet: Pet | null; total: number; paidBefore: number; pendingAmount: number; onSelectCustomer: () => void; onClose: () => void; onConfirm: (pendingReason: string, pendingNotes: string, expectedPaymentDate?: string) => Promise<void> }) {
+function PayLaterModal({ sale, customer, pet, total, paidBefore, pendingAmount, onSelectCustomer, onClose, onConfirm }: { sale: Sale | null; customer: Customer | null; pet: Pet | null; total: number; paidBefore: number; pendingAmount: number; onSelectCustomer: () => void; onClose: () => void; onConfirm: (pendingReason: string, pendingNotes: string, expectedPaymentDate: string | undefined, adminEmail: string, adminPassword: string) => Promise<void> }) {
   const [pendingReason, setPendingReason] = useState(sale?.pendingReason ?? "PIX_LATER");
   const [pendingNotes, setPendingNotes] = useState(sale?.pendingNotes ?? "");
   const [expectedDate, setExpectedDate] = useState("");
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -3210,10 +3220,11 @@ function PayLaterModal({ sale, customer, pet, total, paidBefore, pendingAmount, 
     setMessage("");
     if (!customer?.id) return setMessage("Para registrar um pagamento para depois, é necessário vincular um cliente ao pedido.");
     if (!pendingNotes.trim()) return setMessage("Informe a observação obrigatória.");
+    if (!adminEmail.trim() || !adminPassword) return setMessage("Informe o e-mail e a senha do dono ou administrador para liberar o pagamento posterior.");
     if (saving) return;
     setSaving(true);
     try {
-      await onConfirm(pendingReason, buildPendingNotes(pendingNotes, expectedDate), expectedDate || undefined);
+      await onConfirm(pendingReason, buildPendingNotes(pendingNotes, expectedDate), expectedDate || undefined, adminEmail, adminPassword);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Falha ao registrar pagamento para depois.");
       setSaving(false);
@@ -3237,6 +3248,7 @@ function PayLaterModal({ sale, customer, pet, total, paidBefore, pendingAmount, 
         <select className="field" value={pendingReason} onChange={(event) => setPendingReason(event.target.value)}>{Object.entries(pendingReasonLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
         <textarea className="field" placeholder="Observação obrigatória" value={pendingNotes} onChange={(event) => setPendingNotes(event.target.value)} />
         <label className="text-sm font-medium">Data prevista de pagamento<input className="field mt-1" type="date" value={expectedDate} onChange={(event) => setExpectedDate(event.target.value)} /></label>
+        <fieldset className="rounded-lg border border-slate-200 p-3"><legend className="px-1 text-sm font-semibold">Liberação do dono</legend><p className="mb-3 text-sm text-slate-600">Informe o e-mail e a senha do dono ou administrador para autorizar este pagamento posterior.</p><div className="grid gap-3 sm:grid-cols-2"><label className="text-sm font-semibold">E-mail do dono<input className="field mt-1" type="email" autoComplete="username" value={adminEmail} onChange={(event) => setAdminEmail(event.target.value)} /></label><label className="text-sm font-semibold">Senha<input className="field mt-1" type="password" autoComplete="current-password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} /></label></div></fieldset>
         {message && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{message}</p>}
         <div className="flex flex-wrap justify-end gap-2"><button className="btn btn-secondary" type="button" onClick={onClose}>Cancelar</button><button className="btn btn-primary" type="button" disabled={saving} onClick={savePayLater}>{saving ? "Salvando..." : "Confirmar pagar depois"}</button></div>
       </>}

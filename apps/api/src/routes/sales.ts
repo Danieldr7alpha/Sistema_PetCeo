@@ -75,6 +75,7 @@ const checkoutSchema = z.object({
   pendingReason: z.enum(pendingReasons).optional(),
   pendingNotes: z.string().optional(),
   expectedPaymentDate: z.string().date().optional(),
+  adminEmail: z.string().trim().email().optional(),
   adminPassword: z.string().optional(),
   membershipId: z.string().optional(),
   items: z.array(saleItemSchema).min(1)
@@ -141,6 +142,15 @@ async function validateAdminPassword(cid: string, adminPassword?: string) {
     if (await bcrypt.compare(adminPassword, admin.passwordHash)) return true;
   }
   return false;
+}
+
+async function validateOwnerCredentials(cid: string, adminEmail?: string, adminPassword?: string) {
+  if (!adminEmail || !adminPassword) return false;
+  const owner = await prisma.user.findFirst({
+    where: { companyId: cid, email: adminEmail.trim().toLowerCase(), role: "ADMIN", active: true },
+    select: { passwordHash: true }
+  });
+  return Boolean(owner && await bcrypt.compare(adminPassword, owner.passwordHash));
 }
 
 async function openCashSession(cid: string) {
@@ -1265,6 +1275,9 @@ salesRouter.post("/", async (req, res) => {
     if (body.status !== "PAID" && !body.customerId) {
       return res.status(400).json({ message: "Para registrar pagamento para depois, vincule um cliente cadastrado ao pedido." });
     }
+    if (body.status !== "PAID" && !(await validateOwnerCredentials(cid, body.adminEmail, body.adminPassword))) {
+      return res.status(403).json({ message: "Para deixar saldo para receber depois, informe o e-mail e a senha do dono ou administrador." });
+    }
     if (requiresDiscountApproval(totals.discountPercent) && !(await validateAdminPassword(cid, body.adminPassword))) {
       return res.status(403).json({ message: "Desconto acima de 10% exige senha do administrador." });
     }
@@ -1373,6 +1386,9 @@ salesRouter.patch("/:id/checkout", async (req, res) => {
     await validateCustomerPet(cid, customerId, petId);
     if (body.status !== "PAID" && !customerId) {
       return res.status(400).json({ message: "Para registrar pagamento para depois, vincule um cliente cadastrado ao pedido." });
+    }
+    if (body.status !== "PAID" && !(await validateOwnerCredentials(cid, body.adminEmail, body.adminPassword))) {
+      return res.status(403).json({ message: "Para deixar saldo para receber depois, informe o e-mail e a senha do dono ou administrador." });
     }
 
     let itemData: CheckoutItemData[];
