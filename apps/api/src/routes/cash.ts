@@ -257,6 +257,12 @@ async function cashReportSummary(req: Request, res: import("express").Response) 
     },
     orderBy: { createdAt: "asc" }
   });
+  const adjustments = await prisma.saleAdjustment.findMany({
+    where: cashSessionId
+      ? { companyId: cid, OR: [{ originalCashSessionId: cashSessionId }, { performedCashSessionId: cashSessionId }] }
+      : { companyId: cid, createdAt: { gte: from, lte: to } },
+    include: { sale: { select: { internalCode: true } } }, orderBy: { createdAt: "asc" }
+  });
   const totalsByMethod = Object.fromEntries(paymentMethods.map((method) => [method, 0])) as Record<typeof paymentMethods[number], number>;
   const byOperator = new Map<string, number>();
   const byService = new Map<string, number>();
@@ -316,6 +322,13 @@ async function cashReportSummary(req: Request, res: import("express").Response) 
       reason: sale.refundReason,
       refundedAt: sale.refundedAt,
       operatorName: sale.refundedByName
+    })),
+    adjustments: adjustments.map((adjustment) => ({
+      id: adjustment.id, createdAt: adjustment.createdAt, saleCode: adjustment.sale.internalCode,
+      type: adjustment.type, justification: adjustment.justification, previousPayments: adjustment.previousPayments,
+      newPayments: adjustment.newPayments, refundStatus: adjustment.refundStatus, refundAmount: adjustment.refundAmount == null ? null : Number(adjustment.refundAmount),
+      proofFileName: adjustment.proofFileName, operatorName: adjustment.performedByName,
+      originalCashSessionId: adjustment.originalCashSessionId, performedCashSessionId: adjustment.performedCashSessionId
     })),
     paymentDetails: receivedPayments.map((payment) => ({
       id: payment.id,

@@ -15,6 +15,7 @@ import { financialRouter } from "./routes/financial.js";
 import { managementRouter } from "./routes/management.js";
 import { publicRegistrationRouter } from "./routes/public-registration.js";
 import { notificationsRouter } from "./routes/notifications.js";
+import { orderAdjustmentsRouter } from "./routes/order-adjustments.js";
 import { prisma } from "./lib/prisma.js";
 
 export const app = express();
@@ -36,7 +37,7 @@ app.use(
     }
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: "12mb" }));
 
 app.get("/health", async (_req, res) => {
   try {
@@ -57,6 +58,7 @@ app.use("/catalog", requireAuth, requirePermission("products"), catalogRouter);
 app.use("/appointments", requireAuth, requirePermission("appointments"), appointmentsRouter);
 app.use("/memberships", requireAuth, requirePermission("memberships"), membershipsRouter);
 app.use("/sales", requireAuth, requirePermission("checkout"), salesRouter);
+app.use("/orders", requireAuth, orderAdjustmentsRouter);
 app.use("/cash", requireAuth, requirePermission("checkout"), cashRouter);
 app.use("/financial", requireAuth, requirePermission("financial"), financialRouter);
 app.use("/management", requireAuth, managementRouter);

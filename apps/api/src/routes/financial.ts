@@ -144,18 +144,18 @@ financialRouter.get("/overview", async (req, res) => {
   const now = new Date();
   const [futureInstallments, legacyFuturePayments, pendingSales, fees] = await Promise.all([
     prisma.salePaymentInstallment.aggregate({
-      where: { expectedSettlementDate: { gt: now }, salePayment: { companyId: cid } },
+      where: { expectedSettlementDate: { gt: now }, salePayment: { companyId: cid, sale: { status: "PAID" } } },
       _sum: { netAmount: true }
     }),
     prisma.salePayment.aggregate({
-      where: { companyId: cid, expectedSettlementDate: { gt: now }, settlementInstallments: { none: {} } },
+      where: { companyId: cid, sale: { status: "PAID" }, expectedSettlementDate: { gt: now }, settlementInstallments: { none: {} } },
       _sum: { netAmount: true }
     }),
     prisma.sale.aggregate({
       where: { companyId: cid, status: { in: ["PENDING", "PARTIALLY_PAID"] } },
       _sum: { pendingAmount: true }
     }),
-    prisma.salePayment.aggregate({ where: { companyId: cid }, _sum: { feeAmount: true } })
+    prisma.salePayment.aggregate({ where: { companyId: cid, sale: { status: "PAID" } }, _sum: { feeAmount: true } })
   ]);
   const receivable = Number(futureInstallments._sum.netAmount ?? 0) + Number(legacyFuturePayments._sum.netAmount ?? 0);
   const payable = await prisma.financialPayable.aggregate({ where: { companyId: cid, status: "OPEN" }, _sum: { amount: true } });
@@ -295,12 +295,12 @@ function financialPeriod(req: any, defaultFutureDays = 30) {
 financialRouter.get("/receivables", async (req, res) => {
   const cid = companyId(req); const { start, end } = financialPeriod(req, 30); const accountId = typeof req.query.accountId === "string" ? req.query.accountId : undefined;
   const installmentRows = await prisma.salePaymentInstallment.findMany({
-    where: { expectedSettlementDate: { gte: start, lte: end }, salePayment: { companyId: cid, ...(accountId ? { destinationAccountId: accountId } : {}) } },
+    where: { expectedSettlementDate: { gte: start, lte: end }, salePayment: { companyId: cid, sale: { status: "PAID" }, ...(accountId ? { destinationAccountId: accountId } : {}) } },
     include: { salePayment: { include: { destinationAccount: { select: { id: true, name: true, institutionName: true } }, sale: { select: { internalCode: true, customer: { select: { name: true } }, receipt: { select: { receiptCode: true } } } } } } },
     orderBy: { expectedSettlementDate: "asc" }
   });
   const legacyRows = await prisma.salePayment.findMany({
-    where: { companyId: cid, expectedSettlementDate: { gte: start, lte: end }, settlementInstallments: { none: {} }, ...(accountId ? { destinationAccountId: accountId } : {}) },
+    where: { companyId: cid, sale: { status: "PAID" }, expectedSettlementDate: { gte: start, lte: end }, settlementInstallments: { none: {} }, ...(accountId ? { destinationAccountId: accountId } : {}) },
     include: { destinationAccount: { select: { id: true, name: true, institutionName: true } }, sale: { select: { internalCode: true, customer: { select: { name: true } }, receipt: { select: { receiptCode: true } } } } },
     orderBy: { expectedSettlementDate: "asc" }
   });
@@ -358,7 +358,7 @@ financialRouter.get("/movements", async (req, res) => {
 financialRouter.get("/reports", async (req, res) => {
   const cid = companyId(req); const { start, end } = financialPeriod(req, 30);
   const [payments, payables, openPayables] = await Promise.all([
-    prisma.salePayment.findMany({ where: { companyId: cid, paidAt: { gte: start, lte: end } }, select: { method: true, paymentMethodNameSnapshot: true, grossAmount: true, amount: true, feeAmount: true, netAmount: true, destinationAccount: { select: { name: true } } } }),
+    prisma.salePayment.findMany({ where: { companyId: cid, sale: { status: "PAID" }, paidAt: { gte: start, lte: end } }, select: { method: true, paymentMethodNameSnapshot: true, grossAmount: true, amount: true, feeAmount: true, netAmount: true, destinationAccount: { select: { name: true } } } }),
     prisma.financialPayable.findMany({ where: { companyId: cid, status: "PAID", paidAt: { gte: start, lte: end } }, select: { id: true, description: true, supplierName: true, notes: true, documentNumber: true, category: true, paidAmount: true, interestAmount: true, paidAt: true, paymentMethod: true, paidFromAccount: { select: { name: true } } }, orderBy: { paidAt: "desc" } }),
     prisma.financialPayable.aggregate({ where: { companyId: cid, status: "OPEN", dueDate: { gte: start, lte: end } }, _sum: { amount: true }, _count: true })
   ]);

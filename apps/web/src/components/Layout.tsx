@@ -16,6 +16,7 @@ const items = [
 const cashSubmenus = [
   { key: "checkout", label: "Ponto de Venda" },
   { key: "checkout:pending", label: "Pedidos Pendentes" },
+  { key: "checkout:orders", label: "Ajustes e cancelamentos" },
   { key: "checkout:reports", label: "Relatório" },
   { key: "checkout:closing-reports", label: "Relatórios de fechamento" },
   { key: "checkout:transfer", label: "Transferência" },
@@ -29,6 +30,7 @@ const financialSubmenus = [
   { key: "financial:cash-registers", label: "Caixas" },
   { key: "financial:methods", label: "Formas de recebimento" },
   { key: "financial:receivables", label: "Recebimentos previstos" },
+  { key: "financial:orders", label: "Ajustes e cancelamentos" },
   { key: "financial:payables", label: "Contas a pagar" },
   { key: "financial:movements", label: "Movimentações" },
   { key: "financial:reports", label: "Relatórios" }

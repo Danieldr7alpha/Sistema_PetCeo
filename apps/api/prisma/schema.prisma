@@ -111,6 +111,18 @@ enum SaleStatus {
   REFUNDED
 }
 
+enum SaleAdjustmentType {
+  PAYMENT_ADJUSTMENT
+  CANCELLATION
+  REFUND_CONFIRMATION
+}
+
+enum RefundStatus {
+  NOT_APPLICABLE
+  PENDING
+  CONFIRMED
+}
+
 enum SaleOrigin {
   AGENDA
   DIRECT
@@ -259,6 +271,7 @@ model Company {
   cashRegisters           CashRegister[]
   customerRegistrationInvites CustomerRegistrationInvite[]
   systemNotifications     SystemNotification[]
+  saleAdjustments         SaleAdjustment[]
 }
 
 model CustomerRegistrationInvite {
@@ -314,6 +327,7 @@ model User {
   company              Company              @relation(fields: [companyId], references: [id])
   passwordResetTokens  PasswordResetToken[]
   cashRegisterAccess   UserCashRegister[]
+  saleAdjustments      SaleAdjustment[]
 }
 
 model CashRegister {
@@ -760,6 +774,7 @@ model Sale {
   receipt             SalesReceipt?
   membershipPurchase  CustomerMembership? @relation("MembershipPurchaseSale")
   groupedAppointments Appointment[]        @relation("AppointmentCheckoutSale")
+  adjustments         SaleAdjustment[]
 
   @@unique([companyId, internalCode])
   @@unique([companyId, appointmentId])
@@ -772,6 +787,39 @@ model Sale {
   @@index([companyId, refundedAt])
   @@index([companyId, refundCashSessionId])
   @@index([companyId, preSaleId])
+}
+
+model SaleAdjustment {
+  id                    String             @id @default(cuid())
+  companyId             String
+  saleId                String
+  originalCashSessionId String?
+  performedCashSessionId String?
+  type                  SaleAdjustmentType
+  idempotencyKey        String             @unique
+  justification         String
+  cancellationReason    String?
+  previousPayments      Json?
+  newPayments           Json?
+  refundStatus          RefundStatus       @default(NOT_APPLICABLE)
+  refundAmount          Decimal?           @db.Decimal(10, 2)
+  refundMethod          PaymentMethod?
+  refundDate            DateTime?
+  refundResponsibleId   String?
+  refundResponsibleName String?
+  proofPath             String?
+  proofFileName         String?
+  proofMimeType         String?
+  performedById         String?
+  performedByName       String?
+  createdAt             DateTime           @default(now())
+  company               Company            @relation(fields: [companyId], references: [id])
+  sale                  Sale               @relation(fields: [saleId], references: [id])
+  performedBy           User?              @relation(fields: [performedById], references: [id])
+
+  @@index([companyId, saleId, createdAt])
+  @@index([companyId, originalCashSessionId, createdAt])
+  @@index([companyId, performedCashSessionId, createdAt])
 }
 
 model SalesReceipt {
