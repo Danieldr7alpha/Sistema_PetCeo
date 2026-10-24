@@ -26,7 +26,9 @@ async function actor(req: import("express").Request) {
 }
 
 const saleInclude = {
-  customer: { select: { name: true } }, pet: { select: { name: true } }, cashSession: { include: { cashRegister: { select: { name: true, code: true } } } },
+  customer: { select: { internalCode: true, name: true, phone: true } }, pet: { select: { name: true } },
+  items: { select: { id: true, itemType: true, description: true, quantity: true, unitPrice: true, total: true, coveredByMembership: true }, orderBy: { createdAt: "asc" as const } },
+  cashSession: { include: { cashRegister: { select: { name: true, code: true } } } },
   payments: { orderBy: { paidAt: "asc" as const } }, receipt: { select: { fiscalDocumentType: true, fiscalStatus: true } }
 };
 
@@ -58,6 +60,21 @@ orderAdjustmentsRouter.get("/search", requirePermission("orders:history"), async
   const sale = await prisma.sale.findFirst({ where: { companyId: cid, internalCode: code }, include: saleInclude });
   if (!sale) return res.status(404).json({ message: "Pedido não encontrado nesta empresa." });
   res.json(sale);
+});
+
+// Mantém a escolha de modalidade idêntica à tela de recebimento do Caixa,
+// sem exigir que o operador tenha acesso ao módulo Financeiro.
+orderAdjustmentsRouter.get("/payment-methods", requirePermission("orders:history"), async (req, res) => {
+  const methods = await prisma.financialPaymentMethod.findMany({
+    where: { companyId: companyId(req), active: true, destinationAccount: { active: true } },
+    include: {
+      destinationAccount: { select: { id: true, name: true, type: true } },
+      brands: { where: { active: true }, orderBy: { brandName: "asc" } },
+      feeRules: { where: { active: true }, orderBy: { installments: "asc" } }
+    },
+    orderBy: { name: "asc" }
+  });
+  res.json(methods);
 });
 
 orderAdjustmentsRouter.get("/:id", requirePermission("orders:history"), async (req, res) => {
